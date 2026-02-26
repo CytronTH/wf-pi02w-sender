@@ -1,0 +1,30 @@
+{
+    "tcp": {
+        "ip": "10.10.10.199",
+        "port": 8080
+    },
+    "mqtt": {
+        "broker": "10.10.10.199",
+        "port": 1883,
+        "username": "admin",
+        "password": "admin123",
+        "topic_cmd": "camera/command",
+        "topic_status": "camera0/status"
+    },
+    "camera": {
+        "id": 0,
+        "default_width": 2304,
+        "default_height": 1296,
+        "jpeg_quality": 90,
+        "continuous_stream": false,
+        "stream_interval": 1.0,
+        "loop_delay": 0.05
+    },
+    "preprocessing": {
+        "enable_alignment": true,
+        "enable_shadow_removal": true,
+        "enable_grayscale": true,
+        "enable_clahe": true,
+        "enable_box_cropping": true
+    }
+}
