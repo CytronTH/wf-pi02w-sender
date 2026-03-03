@@ -23,6 +23,13 @@
     "preprocessing": {
         "enable_alignment": true,
         "enable_shadow_removal": true,
+        "enable_pre_crop": false,
+        "pre_crop": {
+            "top": 0,
+            "bottom": 0,
+            "left": 0,
+            "right": 0
+        },
         "enable_grayscale": true,
         "enable_clahe": true,
         "enable_box_cropping": true

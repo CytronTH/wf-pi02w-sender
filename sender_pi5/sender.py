@@ -385,9 +385,30 @@ def pre_process_worker():
             else:
                 shadow_removed = aligned_img
                 
+            # --- 2.5 Pre-Crop ---
+            c_top = c_bottom = c_left = c_right = 0
+            enable_pre_crop = prep_config.get("enable_pre_crop", False)
+            if enable_pre_crop:
+                crop_cfg = prep_config.get("pre_crop", {})
+                c_top = int(crop_cfg.get("top", 0))
+                c_bottom = int(crop_cfg.get("bottom", 0))
+                c_left = int(crop_cfg.get("left", 0))
+                c_right = int(crop_cfg.get("right", 0))
+                
+                h, w = shadow_removed.shape[:2]
+                
+                c_top = max(0, min(c_top, h - 1))
+                c_bottom = max(0, min(c_bottom, h - 1 - c_top))
+                c_left = max(0, min(c_left, w - 1))
+                c_right = max(0, min(c_right, w - 1 - c_left))
+                
+                pre_cropped = shadow_removed[c_top:h-c_bottom, c_left:w-c_right]
+            else:
+                pre_cropped = shadow_removed
+
             # --- 3. Grayscale & CLAHE ---
             if enable_gray:
-                gray_img = cv2.cvtColor(shadow_removed, cv2.COLOR_BGR2GRAY)
+                gray_img = cv2.cvtColor(pre_cropped, cv2.COLOR_BGR2GRAY)
                 
                 if enable_clahe and not args.disable_clahe:
                     processed_gray = clahe_obj.apply(gray_img)
@@ -397,7 +418,7 @@ def pre_process_worker():
                 # TCP expects 3 channels for current send_image encoding / viewing, convert back
                 final_surface = cv2.cvtColor(processed_gray, cv2.COLOR_GRAY2BGR)
             else:
-                final_surface = shadow_removed
+                final_surface = pre_cropped
             
             # --- 4. Process Masks & Crops ---
             images_to_send = []
@@ -407,8 +428,8 @@ def pre_process_worker():
                 h_out, w_out = masked_surface.shape[:2]
                 
                 # Map coordinates from original JSON size to current output size
-                # Since size changes in this pipeline are due to calibration padding, 
-                # the size difference is an exact translation (offset) rather than a linear scale.
+                # Reference size here should be compared directly to the current image size (w_out, h_out)
+                # without caring if it was pre-cropped or not. Users want coordinates to remain fixed to the frame.
                 ref_size = mask_config.get("reference_image_size", {})
                 ref_w = ref_size.get("width", w_out)
                 ref_h = ref_size.get("height", h_out)
@@ -418,7 +439,8 @@ def pre_process_worker():
                 
                 mask_regions = mask_config.get("mask_regions", [])
                 for region in mask_regions:
-                    # Apply absolute offset correctly based on padding differences
+                    # Apply absolute offset correctly based on padding differences 
+                    # from the mask config reference, ignoring any pre_crop shift.
                     rx = int(region["x"] + offset_x)
                     ry = int(region["y"] + offset_y)
                     rw = int(region["w"])
@@ -446,12 +468,22 @@ def pre_process_worker():
             
             # Send the main masked surface first
             total_to_send = 1 + len(images_to_send)
-            print(f"INFO: Pre-processing complete. {total_to_send} images prepared for sending (1 surface + {len(images_to_send)} crops).")
+            if enable_pre_crop:
+                total_to_send += 1
+                
+            print(f"INFO: Pre-processing complete. {total_to_send} images prepared for sending.")
             send_image(masked_surface, image_id="masked_surface")
+            
+            if enable_pre_crop:
+                # Send the pre-cropped version before the small crops
+                if args.debug_align:
+                    cv2.imwrite(os.path.join(debug_out_dir, f"preproc_{base_name}_pre_crop.jpg"), pre_cropped)
+                # Currently pre_cropped is generated in Step 2.5
+                send_image(pre_cropped, image_id="pre_crop")
             
             if enable_crop:
                 # Followed by all the crops (Should be 6 crops based on user config)
-                # The receiver will get id="crop_0", "crop_1", etc.
+                # The receiver will get id="crop_1", "crop_2", etc.
                 for idx, crop in enumerate(images_to_send):
                     crop_id = f"crop_{idx + 1}"
                     if args.debug_align:
