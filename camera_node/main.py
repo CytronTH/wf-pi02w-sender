@@ -648,6 +648,10 @@ def on_mqtt_message(client, userdata, msg):
         # Capture signal
         if payload.get('action') == 'capture':
             capture_triggered = True
+            current_time = time.strftime("%Y-%m-%d %H:%M:%S")
+            print(f"\n=======================================================")
+            print(f"[{current_time}] 🎯 MQTT TRIGGER RECEIVED: 'capture'")
+            print(f"=======================================================\n")
 
 
         # System management
