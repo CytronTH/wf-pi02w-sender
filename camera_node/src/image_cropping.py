@@ -11,10 +11,10 @@ def load_calibration():
     
     # Check possible places for crop_4point.json
     config_paths = [
-        os.path.join(parent_dir, "configs", "crop_4point.json"),
-        os.path.join(base_dir, "crop_4point.json"),
-        "configs/crop_4point.json",
-        "crop_4point.json"
+        os.path.join(parent_dir, "configs", "calibration_points.json"),
+        os.path.join(base_dir, "calibration_points.json"),
+        "configs/calibration_points.json",
+        "calibration_points.json"
     ]
     
     config_path = None
@@ -24,7 +24,7 @@ def load_calibration():
             break
             
     if not config_path:
-        raise ValueError("CRITICAL ERROR: configs/crop_4point.json not found.")
+        raise ValueError("CRITICAL ERROR: configs/calibration_points.json not found.")
     
     with open(config_path, "r") as f:
         config = json.load(f)

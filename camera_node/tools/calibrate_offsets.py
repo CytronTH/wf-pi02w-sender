@@ -138,6 +138,14 @@ def calibrate(image_path):
 def save_calibration(img):
     global mark_rois, corners
     
+    # Resolve project root dir and configs dir
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    configs_dir = os.path.join(project_root, "configs")
+    templates_dir = os.path.join(configs_dir, "templates")
+    
+    os.makedirs(templates_dir, exist_ok=True)
+    
     # 1. Save 4 Mark Templates
     marks_data = []
     
@@ -151,8 +159,9 @@ def save_calibration(img):
         
         template = img[y_start:y_end, x_start:x_end]
         filename = f"mark{i+1}_template.jpg"
-        cv2.imwrite(filename, template)
-        print(f"Saved '{filename}'")
+        filepath = os.path.join(templates_dir, filename)
+        cv2.imwrite(filepath, template)
+        print(f"Saved '{filepath}'")
         
         # Store center of mark
         cx = (x_start + x_end) // 2
@@ -172,10 +181,11 @@ def save_calibration(img):
         "calibration_corners": corners_data
     }
 
-    with open("configs/crop_4point.json", "w") as f:
+    config_path = os.path.join(configs_dir, "calibration_points.json")
+    with open(config_path, "w") as f:
         json.dump(config, f, indent=4)
     
-    print("Saved 'configs/crop_4point.json'")
+    print(f"Saved '{config_path}'")
     print("Calibration Complete!")
 
 if __name__ == "__main__":

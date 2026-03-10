@@ -18,12 +18,22 @@ pip3 install -r requirements.txt --break-system-packages 2>/dev/null || pip3 ins
 
 # Install Systemd Template Service
 echo "[4/4] Installing Dual Camera Systemd Service..."
-sudo systemctl stop camera-sender.service 2>/dev/null || true
-sudo systemctl disable camera-sender.service 2>/dev/null || true
-sudo rm -f /etc/systemd/system/camera-sender.service
+sudo systemctl stop camera-sender@0.service 2>/dev/null || true
+sudo systemctl stop camera-sender@1.service 2>/dev/null || true
+sudo systemctl disable camera-sender@0.service 2>/dev/null || true
+sudo systemctl disable camera-sender@1.service 2>/dev/null || true
+sudo rm -f /etc/systemd/system/camera-sender@.service
 
-sudo cp camera-sender@.service /etc/systemd/system/
+# Inject current user and full directory path into the service file
+CURRENT_USER=$(whoami)
+CURRENT_DIR=$(pwd)
+sed -e "s|CURRENT_USER_PLACEHOLDER|${CURRENT_USER}|g" \
+    -e "s|CURRENT_DIR_PLACEHOLDER|${CURRENT_DIR}|g" \
+    camera-sender@.service > /tmp/camera-sender@.service.tmp
+
+sudo cp /tmp/camera-sender@.service.tmp /etc/systemd/system/camera-sender@.service
 sudo systemctl daemon-reload
+sudo rm -f /tmp/camera-sender@.service.tmp
 
 echo "========================================="
 echo "Setup complete! The service is now template-based."

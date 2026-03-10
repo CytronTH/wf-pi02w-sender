@@ -4,7 +4,7 @@ import argparse
 import os
 import glob
 
-def select_masks(image_path, output_config="configs/masks.json"):
+def select_masks(image_path, output_config="configs/crop_regions.json"):
     # 1. Load Image
     if not os.path.exists(image_path):
         print(f"Error: Image {image_path} not found.")
@@ -80,6 +80,14 @@ def select_masks(image_path, output_config="configs/masks.json"):
             "height": img.shape[0]
         }
     }
+    
+    # Resolve the project root for saving configs correctly regardless of cwd
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    if not os.path.isabs(output_config):
+        output_config = os.path.join(project_root, output_config)
+        
+    os.makedirs(os.path.dirname(output_config), exist_ok=True)
     
     with open(output_config, "w") as f:
         json.dump(config, f, indent=4)

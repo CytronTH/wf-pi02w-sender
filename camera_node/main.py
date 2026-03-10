@@ -16,10 +16,10 @@ import sys
 base_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(base_dir, 'src'))
 
-from src.align_wall_boxes import calculate_canonical_targets, find_mark
-from src.batch_shadow_removal import remove_shadows_divisive
-from src.batch_process_grayscale import cv2 as dummy_cv2
-import src.crop_wall_boxes as cwb
+from src.image_alignment import calculate_canonical_targets, find_mark
+from src.shadow_removal import remove_shadows_divisive
+from src.grayscale_filter import cv2 as dummy_cv2
+import src.image_cropping as cwb
 
 # --- Configuration Loader ---
 parser = argparse.ArgumentParser(description="Camera Sender Script")
@@ -42,6 +42,19 @@ MQTT_BROKER = config.get("mqtt", {}).get("broker", "10.10.10.199")
 MQTT_PORT = config.get("mqtt", {}).get("port", 1883)
 MQTT_TOPIC_CMD = config.get("mqtt", {}).get("topic_cmd", "camera/command")
 MQTT_TOPIC_STATUS = config.get("mqtt", {}).get("topic_status", "camera/status")
+
+hostname = socket.gethostname()
+# Replace hardcoded wf52 prefix with actual hostname to prevent conflicts on new boards
+if MQTT_TOPIC_CMD.startswith("wf52/"):
+    MQTT_TOPIC_CMD = f"{hostname}/" + MQTT_TOPIC_CMD.split("/", 1)[1]
+elif "{hostname}" in MQTT_TOPIC_CMD:
+    MQTT_TOPIC_CMD = MQTT_TOPIC_CMD.replace("{hostname}", hostname)
+
+if MQTT_TOPIC_STATUS.startswith("wf52/"):
+    MQTT_TOPIC_STATUS = f"{hostname}/" + MQTT_TOPIC_STATUS.split("/", 1)[1]
+elif "{hostname}" in MQTT_TOPIC_STATUS:
+    MQTT_TOPIC_STATUS = MQTT_TOPIC_STATUS.replace("{hostname}", hostname)
+
 MQTT_USERNAME = config.get("mqtt", {}).get("username", None)
 MQTT_PASSWORD = config.get("mqtt", {}).get("password", None)
 
@@ -120,7 +133,7 @@ def init_preprocessing():
     if enable_crop:
         print("INFO: Loading Mask Config...")
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        mask_config_path = os.path.join(base_dir, "configs", "masks.json")
+        mask_config_path = os.path.join(base_dir, "configs", "crop_regions.json")
         
         try:
             with open(mask_config_path, "r") as f:
@@ -447,13 +460,18 @@ def pre_process_worker():
                     rh = int(region["h"])
                     
                     # Boundary checks
-                    rx = max(0, rx); ry = max(0, ry)
-                    rw = min(rw, w_out - rx)
-                    rh = min(rh, h_out - ry)
+                    # Map rx, ry to inside the image safely
+                    crop_x1 = max(0, rx)
+                    crop_y1 = max(0, ry)
+                    crop_x2 = min(w_out, rx + rw)
+                    crop_y2 = min(h_out, ry + rh)
                     
-                    if rw > 0 and rh > 0:
-                        mark_crop = final_surface[ry:ry+rh, rx:rx+rw]
-                        images_to_send.append(mark_crop)
+                    if crop_x2 > crop_x1 and crop_y2 > crop_y1:
+                        mark_crop = final_surface[crop_y1:crop_y2, crop_x1:crop_x2]
+                        # Support sending with the name specified in the config if available
+                        raw_id = region.get("id", f"mask_{len(images_to_send) + 1}")
+                        crop_id = raw_id.replace("mask_", "crop_") if raw_id.startswith("mask_") else raw_id
+                        images_to_send.append((crop_id, mark_crop))
                         
                     # Mask Surface
                     cv2.rectangle(masked_surface, (rx, ry), (rx+rw, ry+rh), (0, 0, 0), -1)
@@ -483,9 +501,8 @@ def pre_process_worker():
             
             if enable_crop:
                 # Followed by all the crops (Should be 6 crops based on user config)
-                # The receiver will get id="crop_1", "crop_2", etc.
-                for idx, crop in enumerate(images_to_send):
-                    crop_id = f"crop_{idx + 1}"
+                # The receiver will get id="mask_1", "mask_2", etc as defined in masks.json
+                for crop_id, crop in images_to_send:
                     if args.debug_align:
                         cv2.imwrite(os.path.join(debug_out_dir, f"preproc_{base_name}_{crop_id}.jpg"), crop)
                     send_image(crop, image_id=crop_id)
@@ -498,8 +515,8 @@ def pre_process_worker():
                 print(f"⚠️ MOCK WARNING: Skipping image '{img_name}': {e}")
                 image_queue.task_done()
             else:
-                print(f"CRITICAL ERROR: Pre-processing worker failed: {e}")
-                os._exit(1)
+                print(f"⚠️ ALIGNMENT WARNING: Pre-processing skipped this frame: {e}")
+                image_queue.task_done()
         except Exception as e:
             print(f"CRITICAL ERROR: Unexpected Pre-processing worker failure: {e}")
             os._exit(1) # Force exit immediately if there is a fatal error in the thread
@@ -558,6 +575,12 @@ def on_mqtt_message(client, userdata, msg):
         if config_updated:
             # Move save_config to a background thread to prevent blocking MQTT loop
             threading.Thread(target=save_config, daemon=True).start()
+            
+            # Publish updated parameters immediately
+            updated_params = {
+                'camera_params': config.get("camera_params", {})
+            }
+            client.publish(MQTT_TOPIC_STATUS, json.dumps(updated_params))
 
         # Handle resolution changes
         if 'resolution' in payload:
@@ -681,6 +704,7 @@ def main():
                     'ram_usage_percent': round(get_ram_usage(), 2),
                     'cpu_usage_percent': round(get_cpu_usage(), 2),
                     'resolution': [current_width, current_height],
+                    'camera_params': config.get("camera_params", {})
                 }
                 mqtt_client.publish(MQTT_TOPIC_STATUS, json.dumps(status))
                 last_status_time = current_time
