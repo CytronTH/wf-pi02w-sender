@@ -341,9 +341,19 @@ def pre_process_worker():
             enable_clahe = prep_config.get("enable_clahe", True)
             enable_crop = prep_config.get("enable_box_cropping", True)
             
-            # If no configs loaded but we need them, fallback to raw
-            if (enable_align and not preproc_config) or (enable_crop and not mask_config):
-                print("INFO: Sending raw image for calibration (Missing JSON configs)")
+            # Check if we should fallback to just sending/saving raw images.
+            # This happens if:
+            # 1. We want alignment/cropping but the configs were not found
+            # 2. Both alignment and cropping are explicitly disabled (e.g. from Fallback Config)
+            missing_configs = (enable_align and not preproc_config) or (enable_crop and not mask_config)
+            calibration_mode_active = (not enable_align) and (not enable_crop)
+            
+            if missing_configs or calibration_mode_active:
+                if missing_configs:
+                    print("INFO: Sending raw image for calibration (Missing JSON configs)")
+                else:
+                    print("INFO: Sending raw image for calibration (Calibration Mode Active)")
+                    
                 send_image(frame, image_id="raw_image")
                 
                 # Save a high-quality copy locally for offline calibration via SSH
