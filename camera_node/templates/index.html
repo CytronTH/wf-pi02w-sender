@@ -1,0 +1,1588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Stream & Switcher</title>
+    <!-- Use a modern Google Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+            --bg-color: #0f172a;
+            --surface-color: rgba(30, 41, 59, 0.7);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --success-color: #22c55e;
+            --warning-color: #eab308;
+            --danger-color: #ef4444;
+            --glow: 0 0 20px rgba(99, 102, 241, 0.4);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.15) 0%, transparent 50%),
+                radial-gradient(circle at 85% 30%, rgba(168, 85, 247, 0.15) 0%, transparent 50%);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+            animation: fadeInDown 0.8s ease-out;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 800;
+            background: var(--primary-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+            text-shadow: var(--glow);
+        }
+
+        .header p {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 900px;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        /* Glassmorphism Card */
+        .card {
+            background: var(--surface-color);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            animation: fadeInUp 0.8s ease-out backwards;
+            animation-delay: 0.2s;
+        }
+
+        /* Video Feed Section */
+        .video-wrapper {
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .video-feed {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: none; /* Shown via JS */
+        }
+        
+        .placeholder-text {
+            color: var(--text-muted);
+            font-size: 1.2rem;
+            text-align: center;
+            position: absolute;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+        }
+        
+        .placeholder-icon {
+            font-size: 3rem;
+            opacity: 0.5;
+        }
+
+        /* Status Banner */
+        .status-banner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 1rem 1.5rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+            border-left: 4px solid var(--success-color);
+            transition: all 0.3s ease;
+        }
+        
+        .status-banner.tcp-mode {
+            border-left-color: var(--primary-gradient);
+            background: linear-gradient(90deg, rgba(99, 102, 241, 0.1) 0%, transparent 100%);
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-weight: 600;
+        }
+
+        .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: var(--success-color);
+            box-shadow: 0 0 10px var(--success-color);
+            animation: pulse 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
+        }
+        
+        .tcp-mode .dot {
+            background-color: #a855f7;
+            box-shadow: 0 0 10px #a855f7;
+        }
+
+        /* Controls Section */
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .btn {
+            font-family: inherit;
+            position: relative;
+            padding: 1rem 2rem;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: white;
+            cursor: pointer;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+        }
+        
+        .btn::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255,255,255,0.1);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px -10px rgba(0,0,0,0.5);
+        }
+        
+        .btn:hover::after {
+            opacity: 1;
+        }
+
+        .btn:active {
+            transform: translateY(1px);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-webui {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+        }
+
+        .btn-tcp {
+            background: var(--primary-gradient);
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+        }
+        
+        .btn.active {
+            box-shadow: inset 0 3px 6px rgba(0,0,0,0.3);
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+        
+        .btn.active::before {
+            content: "✓";
+            font-weight: bold;
+        }
+
+        /* Camera Controls Accordion */
+        .camera-controls-accordion {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            margin-top: 1rem;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .camera-controls-accordion summary {
+            padding: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            list-style: none;
+            display: flex;
+            align-items: center;
+            user-select: none;
+            color: var(--text-main);
+        }
+
+        .camera-controls-accordion summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .camera-controls-accordion summary::after {
+            content: "▼";
+            margin-left: auto;
+            transition: transform 0.3s ease;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .camera-controls-accordion[open] summary::after {
+            transform: rotate(180deg);
+        }
+
+        .controls-panel {
+            padding: 1rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            background: rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            gap: 1.2rem;
+        }
+
+        .slider-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .slider-group label {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            display: flex;
+            justify-content: space-between;
+        }
+        
+        .slider-group span {
+            color: var(--text-main);
+            font-weight: 600;
+        }
+
+        .slider-group input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+            height: 1.5rem;
+        }
+
+        .slider-group select {
+            width: 100%;
+            padding: 0.5rem;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            font-family: inherit;
+            cursor: pointer;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+
+        @keyframes fadeInDown {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        /* Loading Overlay */
+        .loading-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(5px);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+        
+        .loading-overlay.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(255,255,255,0.1);
+            border-top-color: #a855f7;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 1rem;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(8px);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal-content {
+            background: var(--surface-color);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            width: 90%;
+            max-width: 700px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            animation: slideUp 0.3s ease;
+        }
+
+        .modal-header {
+            padding: 1.5rem 2rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .modal-header h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 2rem;
+            cursor: pointer;
+            transition: color 0.2s;
+            line-height: 1;
+        }
+
+        .close-btn:hover { color: white; }
+
+        .modal-body {
+            padding: 2rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .modal-footer {
+            padding: 1.5rem 2rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: flex-end;
+            gap: 1rem;
+        }
+
+        /* Form Styles */
+        .settings-section {
+            background: rgba(0,0,0,0.2);
+            padding: 1.5rem;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .settings-section h3 {
+            margin-bottom: 1.5rem;
+            font-size: 1.2rem;
+            color: #a855f7;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .input-group {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        
+        .input-group:last-child {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+
+        .input-group label {
+            font-weight: 500;
+            color: var(--text-main);
+            flex: 1;
+        }
+
+        .form-input {
+            width: 50%;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.2);
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            color: white;
+            font-family: inherit;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #6366f1;
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+        }
+
+        /* Toggle Switch */
+        .toggle-switch, .input-group label.toggle-switch {
+            position: relative !important;
+            display: inline-block !important;
+            width: 50px !important;
+            min-width: 50px !important;
+            max-width: 50px !important;
+            height: 28px !important;
+            flex: 0 0 50px !important;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(255,255,255,0.1);
+            transition: .3s;
+            border-radius: 28px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background-color: #94a3b8;
+            transition: .3s;
+            border-radius: 50%;
+        }
+
+        .toggle-switch input:checked + .slider {
+            background-color: var(--success-color);
+            border-color: var(--success-color);
+        }
+
+        .toggle-switch input:checked + .slider:before {
+            transform: translateX(22px);
+            background-color: white;
+        }
+
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        @media (max-width: 600px) {
+            .input-group { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+            .form-input { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+        <h2>Switching Mode...</h2>
+        <p>Please wait while the camera resource is allocated.</p>
+    </div>
+
+    <div class="header">
+        <h1>Camera Switcher</h1>
+        <p>Manage Picamera2 Stream & Network Sender (Dual Camera)</p>
+    </div>
+
+    <!-- Dual Camera Grid -->
+    <div class="container dual-grid">
+        
+        <!-- Camera 0 Panel -->
+        <div class="card">
+            <h2 id="cameraTitle_cam0" style="text-align: center; margin-bottom: 1rem;">Camera 0</h2>
+            <div class="status-banner" id="statusBanner_cam0">
+                <div class="status-indicator">
+                    <div class="dot" id="statusDot_cam0"></div>
+                    <span id="statusText_cam0">Loading...</span>
+                </div>
+                <div style="font-size: 0.9rem; color: var(--text-muted);" id="pidText_cam0"></div>
+            </div>
+
+            <div class="video-wrapper" id="videoWrapper_cam0">
+                <div class="placeholder-text" id="placeholderText_cam0">
+                    <span class="placeholder-icon">📷</span>
+                    <span>Camera is allocated to TCP Sender<br>Live Stream is paused on WebUI.</span>
+                </div>
+                <img id="videoFeed_cam0" class="video-feed" alt="Live Camera Stream">
+            </div>
+
+            <details class="camera-controls-accordion" id="cameraControls_cam0">
+                <summary>📸 Camera Properties</summary>
+                <div class="controls-panel">
+                    <div class="slider-group">
+                        <label>Shutter Speed (us) <span id="shutterVal_cam0">10000</span></label>
+                        <input type="range" id="shutter_cam0" min="1000" max="60000" step="500" value="10000" oninput="updateCamControl('cam0', 'ExposureTime', this.value)">
+                    </div>
+                    <div class="slider-group">
+                        <label>ISO Gain <span id="isoVal_cam0">2.0</span></label>
+                        <input type="range" id="iso_cam0" min="1.0" max="16.0" step="0.1" value="2.0" oninput="updateCamControl('cam0', 'AnalogueGain', this.value)">
+                    </div>
+                    <div class="slider-group">
+                        <label>White Balance (K) <span id="wbVal_cam0">Auto</span></label>
+                        <input type="range" id="wb_cam0" min="2000" max="10000" step="100" value="5000" oninput="updateWbTemp('cam0', this.value)">
+                        <button class="btn" style="padding: 0.2rem 0.6rem; font-size: 0.75rem; margin-top: 0.2rem; width: fit-content; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);" onclick="updateWbTemp('cam0', 'auto')">Auto WB</button>
+                    </div>
+                    <div class="slider-group">
+                        <label>Focus</label>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <select id="focusMode_cam0" onchange="updateFocusMode('cam0', this.value)" style="flex: 1;">
+                                <option value="2">Autofocus</option>
+                                <option value="0">Manual</option>
+                            </select>
+                            <button id="focusLockBtn_cam0" class="btn" style="padding: 0.2rem 0.6rem; font-size: 0.75rem; background: rgba(255,165,0,0.2); border: 1px solid rgba(255,165,0,0.5); display: none;" onclick="toggleAfLock('cam0')">Lock AF</button>
+                            <input type="range" id="focusSlider_cam0" style="flex: 2; display: none;" min="0.0" max="10.0" step="0.1" value="0.0" oninput="updateCamControl('cam0', 'LensPosition', this.value)">
+                            <span id="focusVal_cam0" style="display: none; width: 30px; text-align: right;">0.0</span>
+                        </div>
+                    <div id="saveStatus_cam0" style="color: var(--success-color); font-size: 0.8rem; text-align: right; margin-top: 0.5rem; min-height: 1.2rem;"></div>
+                </div>
+            </details>
+
+            <div class="controls">
+                <button class="btn btn-webui active" id="btnWebui_cam0" onclick="switchMode('cam0', 'webui')">WebUI Stream</button>
+                <button class="btn btn-tcp" id="btnTcp_cam0" onclick="switchMode('cam0', 'tcp')">TCP Sender</button>
+                <button class="btn btn-settings" onclick="openSettings('cam0')" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);">
+                    ⚙️ Config
+                </button>
+                <button class="btn btn-settings" onclick="openCalibration('cam0')" style="background: rgba(168, 85, 247, 0.2); border: 1px solid rgba(168, 85, 247, 0.4);">
+                    🎯 Calibrate
+                </button>
+            </div>
+        </div>
+
+        <!-- Camera 1 Panel -->
+        <div class="card">
+            <h2 id="cameraTitle_cam1" style="text-align: center; margin-bottom: 1rem;">Camera 1</h2>
+            <div class="status-banner" id="statusBanner_cam1">
+                <div class="status-indicator">
+                    <div class="dot" id="statusDot_cam1"></div>
+                    <span id="statusText_cam1">Loading...</span>
+                </div>
+                <div style="font-size: 0.9rem; color: var(--text-muted);" id="pidText_cam1"></div>
+            </div>
+
+            <div class="video-wrapper" id="videoWrapper_cam1">
+                <div class="placeholder-text" id="placeholderText_cam1">
+                    <span class="placeholder-icon">📷</span>
+                    <span>Camera is allocated to TCP Sender<br>Live Stream is paused on WebUI.</span>
+                </div>
+                <img id="videoFeed_cam1" class="video-feed" alt="Live Camera Stream">
+            </div>
+
+            <details class="camera-controls-accordion" id="cameraControls_cam1">
+                <summary>📸 Camera Properties</summary>
+                <div class="controls-panel">
+                    <div class="slider-group">
+                        <label>Shutter Speed (us) <span id="shutterVal_cam1">10000</span></label>
+                        <input type="range" id="shutter_cam1" min="1000" max="60000" step="500" value="10000" oninput="updateCamControl('cam1', 'ExposureTime', this.value)">
+                    </div>
+                    <div class="slider-group">
+                        <label>ISO Gain <span id="isoVal_cam1">2.0</span></label>
+                        <input type="range" id="iso_cam1" min="1.0" max="16.0" step="0.1" value="2.0" oninput="updateCamControl('cam1', 'AnalogueGain', this.value)">
+                    </div>
+                    <div class="slider-group">
+                        <label>White Balance (K) <span id="wbVal_cam1">Auto</span></label>
+                        <input type="range" id="wb_cam1" min="2000" max="10000" step="100" value="5000" oninput="updateWbTemp('cam1', this.value)">
+                        <button class="btn" style="padding: 0.2rem 0.6rem; font-size: 0.75rem; margin-top: 0.2rem; width: fit-content; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);" onclick="updateWbTemp('cam1', 'auto')">Auto WB</button>
+                    </div>
+                    <div class="slider-group">
+                        <label>Focus</label>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <select id="focusMode_cam1" onchange="updateFocusMode('cam1', this.value)" style="flex: 1;">
+                                <option value="2">Autofocus</option>
+                                <option value="0">Manual</option>
+                            </select>
+                            <button id="focusLockBtn_cam1" class="btn" style="padding: 0.2rem 0.6rem; font-size: 0.75rem; background: rgba(255,165,0,0.2); border: 1px solid rgba(255,165,0,0.5); display: none;" onclick="toggleAfLock('cam1')">Lock AF</button>
+                            <input type="range" id="focusSlider_cam1" style="flex: 2; display: none;" min="0.0" max="10.0" step="0.1" value="0.0" oninput="updateCamControl('cam1', 'LensPosition', this.value)">
+                            <span id="focusVal_cam1" style="display: none; width: 30px; text-align: right;">0.0</span>
+                        </div>
+                    <div id="saveStatus_cam1" style="color: var(--success-color); font-size: 0.8rem; text-align: right; margin-top: 0.5rem; min-height: 1.2rem;"></div>
+                </div>
+            </details>
+
+            <div class="controls">
+                <button class="btn btn-webui active" id="btnWebui_cam1" onclick="switchMode('cam1', 'webui')">WebUI Stream</button>
+                <button class="btn btn-tcp" id="btnTcp_cam1" onclick="switchMode('cam1', 'tcp')">TCP Sender</button>
+                <button class="btn btn-settings" onclick="openSettings('cam1')" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);">
+                    ⚙️ Config
+                </button>
+                <button class="btn btn-settings" onclick="openCalibration('cam1')" style="background: rgba(168, 85, 247, 0.2); border: 1px solid rgba(168, 85, 247, 0.4);">
+                    🎯 Calibrate
+                </button>
+            </div>
+        </div>
+
+    </div>
+    
+    <!-- Settings Modal -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">⚙️ Configuration Settings</h2>
+                <button class="close-btn" onclick="closeSettings()">&times;</button>
+            </div>
+            
+            <div class="modal-body" id="settingsBody">
+                <!-- Form generated dynamically -->
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn" style="background: rgba(255,255,255,0.1);" onclick="closeSettings()">Cancel</button>
+                <button class="btn btn-tcp" id="saveBtn" onclick="saveSettings()">Save Configuration</button>
+                <button class="btn btn-webui" style="background: rgba(168, 85, 247, 0.5); border: 1px solid rgba(168, 85, 247, 0.8);" onclick="exportConfig()">📥 Export Settings (.json)</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Calibration Studio Modal -->
+    <div class="modal" id="calibModal">
+        <div class="modal-content" style="max-width: 90vw; height: 90vh;">
+            <div class="modal-header">
+                <h2 id="calibTitle">🎯 Calibration Studio</h2>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-webui" style="padding: 0.5rem 1rem; font-size: 0.9rem;" onclick="captureCalibrationImage('manual')">📸 Manual Capture</button>
+                    <button class="btn btn-tcp" style="padding: 0.5rem 1rem; font-size: 0.9rem;" onclick="captureCalibrationImage('mqtt')">📡 Wait External MQTT</button>
+                    <button class="close-btn" style="margin-left: 0.5rem;" onclick="closeCalibration()">&times;</button>
+                </div>
+            </div>
+            
+            <div class="modal-body" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 1rem;">
+                
+                <!-- Tools / Tabs -->
+                <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.5rem;">
+                    
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <div class="tabs" style="margin: 0;">
+                            <div id="tabAlign" class="tab active" onclick="switchCalibTab('align')">📍 Alignment (Perspective)</div>
+                            <div id="tabCrop" class="tab" onclick="switchCalibTab('crop')">✂️ Box Cropping (ROI)</div>
+                        </div>
+                        
+                        <div id="alignOptions" style="display: none; align-items: center; gap: 1rem;">
+                            <label style="color: white; font-size: 0.9rem; cursor: pointer;">
+                                <input type="radio" name="alignStep" value="marks" checked onchange="switchAlignStep('marks')"> 1. Draw 4 Marker Boxes
+                            </label>
+                            <label style="color: white; font-size: 0.9rem; cursor: pointer;">
+                                <input type="radio" name="alignStep" value="corners" onchange="switchAlignStep('corners')"> 2. Click 4 True Corners
+                            </label>
+                        </div>
+                    </div>
+
+                    <div id="calibInstruction" style="background: rgba(0,0,0,0.3); padding: 0.75rem 1rem; border-radius: 8px; border-left: 4px solid var(--warning-color); font-size: 0.95rem; color: white;">
+                        Step 1: Click and drag to draw exactly 4 marker boxes around the physical tracking symbols.
+                    </div>
+                </div>
+
+                <!-- Canvas Area -->
+                <div style="flex: 1; min-height: 0; background: #000; border-radius: 8px; overflow: auto; display: flex; align-items: center; justify-content: center; position: relative;">
+                    <canvas id="calibCanvas" style="max-width: 100%; max-height: 100%; object-fit: contain; cursor: crosshair;"></canvas>
+                    <div id="calibLoading" style="position: absolute; display: none; background: rgba(0,0,0,0.7); inset: 0; align-items: center; justify-content: center; color: white;">Loading image...</div>
+                </div>
+
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn" style="background: rgba(255,255,255,0.1);" onclick="clearCalibration()">Clear All</button>
+                <button class="btn" style="background: rgba(220, 38, 38, 0.4);" onclick="undoCalibration()">Undo Last</button>
+                <div style="flex:1;"></div>
+                <button class="btn" style="background: rgba(255,255,255,0.1);" onclick="closeCalibration()">Cancel</button>
+                <button class="btn btn-tcp" id="saveCalibBtn" onclick="saveCalibration()">Save Calibration</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Use Javascript Fetch API to talk to backend
+        // We initialize modes for both cameras
+        let currentMode = {
+            "cam0": "webui",
+            "cam1": "webui"
+        }; 
+        let currentConfig = null;
+        let activeSettingsCam = null; // Tracks which camera settings modal is open
+        
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const settingsModal = document.getElementById('settingsModal');
+
+        function updateUI(cam_id, mode, tcpPid = null, sensorName = "Unknown", displayName = null) {
+            currentMode[cam_id] = mode;
+            
+            const titleEl = document.getElementById(`cameraTitle_${cam_id}`);
+            if (titleEl) {
+                const finalName = displayName || `Camera ${cam_id.replace('cam', '')}`;
+                titleEl.innerText = `${finalName} (${sensorName})`;
+            }
+            
+            const videoFeed = document.getElementById(`videoFeed_${cam_id}`);
+            const placeholderText = document.getElementById(`placeholderText_${cam_id}`);
+            const statusBanner = document.getElementById(`statusBanner_${cam_id}`);
+            const statusText = document.getElementById(`statusText_${cam_id}`);
+            const pidText = document.getElementById(`pidText_${cam_id}`);
+            const btnWebui = document.getElementById(`btnWebui_${cam_id}`);
+            const btnTcp = document.getElementById(`btnTcp_${cam_id}`);
+            
+            if (mode === 'webui') {
+                btnWebui.classList.add('active');
+                btnTcp.classList.remove('active');
+                statusBanner.className = 'status-banner';
+                statusText.innerText = "WebUI Live Stream (Active)";
+                pidText.innerText = "";
+                placeholderText.style.display = 'none';
+                videoFeed.style.display = 'block';
+                
+                // Only refresh image if it's currently hidden or src is empty to prevent flicker
+                if (!videoFeed.src || !videoFeed.src.includes(`/video_feed/${cam_id}`)) {
+                     videoFeed.src = `/video_feed/${cam_id}?t=` + new Date().getTime();
+                }
+            } else {
+                btnTcp.classList.add('active');
+                btnWebui.classList.remove('active');
+                statusBanner.className = 'status-banner tcp-mode';
+                statusText.innerText = "TCP Sender (Active Backend Process)";
+                pidText.innerText = tcpPid ? `PID: ${tcpPid}` : "Running";
+                videoFeed.style.display = 'none';
+                
+                // Instead of setting src = "", which browsers resolve to current URL, 
+                // just clear attribute to stop fetching
+                videoFeed.removeAttribute('src'); 
+                
+                placeholderText.style.display = 'flex';
+            }
+        }
+
+        async function switchMode(cam_id, targetMode) {
+            if (targetMode === currentMode[cam_id]) return;
+            loadingOverlay.classList.add('active');
+            try {
+                const response = await fetch('/switch_mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: targetMode, cam_id: cam_id })
+                });
+                const data = await response.json();
+                
+                if (data.status === 'success' || data.status === 'Mode already active') {
+                    // Update video feed immediately after success
+                    if (targetMode === 'webui') {
+                         const videoFeed = document.getElementById(`videoFeed_${cam_id}`);
+                         videoFeed.src = `/video_feed/${cam_id}?t=` + new Date().getTime();
+                    }
+                    setTimeout(() => {
+                        checkStatus(); // Force a fresh status check
+                        loadingOverlay.classList.remove('active');
+                    }, 1000);
+                } else {
+                    alert("Error switching mode: " + data.error);
+                    loadingOverlay.classList.remove('active');
+                }
+            } catch (error) {
+                console.error("Error calling API:", error);
+                alert("Failed to communicate with server.");
+                loadingOverlay.classList.remove('active');
+            }
+        }
+        
+        async function checkStatus() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+                
+                // Update UI for all cameras returned by the server
+                for (const [cam_id, info] of Object.entries(data)) {
+                    updateUI(cam_id, info.mode, info.tcp_pid, info.sensor_name, info.display_name);
+                }
+            } catch (error) {
+                console.error("Error fetching status:", error);
+                setTimeout(checkStatus, 3000);
+            }
+        }
+
+        // --- Settings Logic ---
+        async function openSettings(cam_id) {
+            activeSettingsCam = cam_id;
+            document.getElementById('modalTitle').innerText = `⚙️ Configuration Settings (${cam_id.toUpperCase()})`;
+            settingsModal.style.display = 'flex';
+            document.getElementById('settingsBody').innerHTML = '<div style="text-align:center; padding: 2rem;">Loading configuration...</div>';
+            
+            try {
+                const response = await fetch(`/api/config/${cam_id}`);
+                currentConfig = await response.json();
+                renderSettingsForm();
+            } catch (e) {
+                document.getElementById('settingsBody').innerHTML = '<div style="color:var(--danger-color); padding: 2rem;">Failed to load configuration.</div>';
+            }
+        }
+
+        function closeSettings() {
+            settingsModal.style.display = 'none';
+            activeSettingsCam = null;
+        }
+
+        function createInputGroup(label, value, type, section, key) {
+            const id = `cfg_${section}_${key}`;
+            let inputHtml = "";
+            
+            if (type === 'boolean') {
+                const isChecked = value ? 'checked' : '';
+                inputHtml = `<label class="toggle-switch">
+                    <input type="checkbox" id="${id}" data-section="${section}" data-key="${key}" ${isChecked}>
+                    <span class="slider"></span>
+                </label>`;
+            } else {
+                inputHtml = `<input type="${type}" id="${id}" class="form-input" data-section="${section}" data-key="${key}" value="${value}">`;
+            }
+            
+            return `
+                <div class="input-group">
+                    <label for="${id}">${label}</label>
+                    ${inputHtml}
+                </div>
+            `;
+        }
+
+        function renderSettingsForm() {
+            if (!currentConfig) return;
+            
+            let html = '';
+            
+            // TCP Section
+            html += '<div class="settings-section"><h3>🌐 TCP Configuration</h3>';
+            html += createInputGroup('Destination IP/Host', currentConfig.tcp?.ip || '', 'text', 'tcp', 'ip');
+            html += createInputGroup('Destination Port', currentConfig.tcp?.port || 8080, 'number', 'tcp', 'port');
+            html += '</div>';
+
+            // MQTT Section
+            html += '<div class="settings-section"><h3>📡 MQTT Configuration</h3>';
+            html += createInputGroup('Broker', currentConfig.mqtt?.broker || '', 'text', 'mqtt', 'broker');
+            html += createInputGroup('Port', currentConfig.mqtt?.port || 1883, 'number', 'mqtt', 'port');
+            html += createInputGroup('Username', currentConfig.mqtt?.username || '', 'text', 'mqtt', 'username');
+            html += createInputGroup('Password', currentConfig.mqtt?.password || '', 'password', 'mqtt', 'password');
+            html += createInputGroup('Topic CMD', currentConfig.mqtt?.topic_cmd || '', 'text', 'mqtt', 'topic_cmd');
+            html += createInputGroup('Topic Status', currentConfig.mqtt?.topic_status || '', 'text', 'mqtt', 'topic_status');
+            html += '</div>';
+
+            // Camera Section
+            html += '<div class="settings-section"><h3>📷 Camera Parameters</h3>';
+            html += createInputGroup('Display Name', currentConfig.camera?.name || '', 'text', 'camera', 'name');
+            html += createInputGroup('Device ID (/dev/video*)', currentConfig.camera?.id || 0, 'number', 'camera', 'id');
+            html += createInputGroup('Default Width', currentConfig.camera?.default_width || 2304, 'number', 'camera', 'default_width');
+            html += createInputGroup('Default Height', currentConfig.camera?.default_height || 1296, 'number', 'camera', 'default_height');
+            html += createInputGroup('JPEG Quality', currentConfig.camera?.jpeg_quality || 90, 'number', 'camera', 'jpeg_quality');
+            html += createInputGroup('Continuous Stream Interval (s)', currentConfig.camera?.stream_interval || 1.0, 'number', 'camera', 'stream_interval');
+            html += createInputGroup('Enable Continuous Stream', currentConfig.camera?.continuous_stream || false, 'boolean', 'camera', 'continuous_stream');
+            html += '</div>';
+
+            // Preprocessing Section
+            html += '<div class="settings-section"><h3>🛠️ Pre-processing</h3>';
+            const prep = currentConfig.preprocessing || {};
+            html += createInputGroup('Enable Box Cropping', prep.enable_box_cropping || false, 'boolean', 'preprocessing', 'enable_box_cropping');
+            html += createInputGroup('Enable Alignment', prep.enable_alignment || false, 'boolean', 'preprocessing', 'enable_alignment');
+            html += createInputGroup('Enable Shadow Removal', prep.enable_shadow_removal || false, 'boolean', 'preprocessing', 'enable_shadow_removal');
+            html += createInputGroup('Enable Grayscale', prep.enable_grayscale || false, 'boolean', 'preprocessing', 'enable_grayscale');
+            html += createInputGroup('Enable CLAHE', prep.enable_clahe || false, 'boolean', 'preprocessing', 'enable_clahe');
+            html += createInputGroup('Enable Pre-crop', prep.enable_pre_crop || false, 'boolean', 'preprocessing', 'enable_pre_crop');
+            html += '</div>';
+
+            document.getElementById('settingsBody').innerHTML = html;
+        }
+
+        async function saveSettings() {
+            if (!currentConfig || !activeSettingsCam) return;
+            
+            // Gather all inputs
+            const inputs = document.querySelectorAll('#settingsBody input');
+            inputs.forEach(input => {
+                const section = input.getAttribute('data-section');
+                const key = input.getAttribute('data-key');
+                let val;
+                
+                if (input.type === 'checkbox') {
+                    val = input.checked;
+                } else if (input.type === 'number') {
+                    val = input.value.includes('.') ? parseFloat(input.value) : parseInt(input.value, 10);
+                } else {
+                    val = input.value;
+                }
+                
+                if (!currentConfig[section]) currentConfig[section] = {};
+                currentConfig[section][key] = val;
+            });
+            
+            const btn = document.getElementById('saveBtn');
+            const originalText = btn.innerText;
+            btn.innerText = "Saving...";
+            const savedCamMode = currentMode[activeSettingsCam];
+            
+            try {
+                const response = await fetch(`/api/config/${activeSettingsCam}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(currentConfig)
+                });
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    btn.innerText = "Saved!";
+                    setTimeout(() => {
+                        closeSettings();
+                        btn.innerText = originalText;
+                        if(savedCamMode === 'tcp') {
+                            alert(`Config saved! TCP Process for ${activeSettingsCam} is restarting to apply changes.`);
+                        } else {
+                            alert(`Config saved! Changes for ${activeSettingsCam} will take effect next time TCP Stream is started.`);
+                        }
+                    }, 500);
+                } else {
+                    alert("Error saving: " + data.error);
+                    btn.innerText = originalText;
+                }
+            } catch (error) {
+                console.error("Error saving config:", error);
+                alert("Failed to communicate with server.");
+                btn.innerText = originalText;
+            }
+        }
+        
+        // --- Export Settings Logic ---
+        function exportConfig() {
+            if (!currentConfig || !activeSettingsCam) return;
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(currentConfig, null, 4));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", `config_${activeSettingsCam}.json`);
+            document.body.appendChild(downloadAnchorNode); // required for firefox
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+        }
+
+        // --- Camera Controls Logic ---
+        let currentCamControls = {
+            'cam0': {},
+            'cam1': {}
+        };
+        
+        let afLocked = { 'cam0': false, 'cam1': false };
+        let saveTimeout = {};
+        
+        function toggleAfLock(cam_id) {
+            afLocked[cam_id] = !afLocked[cam_id];
+            const btn = document.getElementById(`focusLockBtn_${cam_id}`);
+            
+            if (afLocked[cam_id]) {
+                currentCamControls[cam_id]['AfPause'] = 2; // Pause Immediate
+                if (btn) {
+                    btn.innerText = "Unlock AF";
+                    btn.style.background = "rgba(16, 185, 129, 0.2)"; // Green
+                    btn.style.borderColor = "rgba(16, 185, 129, 0.5)";
+                }
+            } else {
+                currentCamControls[cam_id]['AfPause'] = 0; // Resume
+                if (btn) {
+                    btn.innerText = "Lock AF";
+                    btn.style.background = "rgba(255, 165, 0, 0.2)"; // Orange
+                    btn.style.borderColor = "rgba(255, 165, 0, 0.5)";
+                }
+            }
+            debouncedSaveCameraControls(cam_id);
+        }
+        
+        function debouncedSaveCameraControls(cam_id) {
+            const statusEl = document.getElementById(`saveStatus_${cam_id}`);
+            statusEl.innerText = "Applying changes...";
+            statusEl.style.color = "var(--text-muted)";
+            
+            if (saveTimeout[cam_id]) {
+                clearTimeout(saveTimeout[cam_id]);
+            }
+            saveTimeout[cam_id] = setTimeout(() => {
+                saveCameraControls(cam_id);
+            }, 400); // 400ms debounce
+        }
+        
+        function updateCamControl(cam_id, control, value) {
+            currentCamControls[cam_id][control] = parseFloat(value);
+            
+            // Update UI Labels immediately
+            if (control === 'ExposureTime') {
+                document.getElementById(`shutterVal_${cam_id}`).innerText = value;
+            } else if (control === 'AnalogueGain') {
+                 document.getElementById(`isoVal_${cam_id}`).innerText = value;
+            } else if (control === 'LensPosition') {
+                 document.getElementById(`focusVal_${cam_id}`).innerText = value;
+            }
+            
+            debouncedSaveCameraControls(cam_id);
+        }
+        
+        function updateWbTemp(cam_id, value) {
+            const valSpan = document.getElementById(`wbVal_${cam_id}`);
+            const slider = document.getElementById(`wb_${cam_id}`);
+            
+            if (value === 'auto') {
+                currentCamControls[cam_id]['AwbEnable'] = true;
+                delete currentCamControls[cam_id]['ColourTemperature'];
+                valSpan.innerText = "Auto";
+                slider.value = 5000; // Reset visually
+            } else {
+                currentCamControls[cam_id]['AwbEnable'] = false;
+                currentCamControls[cam_id]['ColourTemperature'] = parseInt(value);
+                valSpan.innerText = value;
+                slider.value = value;
+            }
+            
+            debouncedSaveCameraControls(cam_id);
+        }
+        
+        function updateFocusMode(cam_id, modeVal) {
+            const mode = parseInt(modeVal);
+            currentCamControls[cam_id]['AfMode'] = mode; // 2=Auto, 0=Manual
+            
+            // Reset AfPause state
+            afLocked[cam_id] = false;
+            delete currentCamControls[cam_id]['AfPause'];
+            const lockBtn = document.getElementById(`focusLockBtn_${cam_id}`);
+            if (lockBtn) {
+                lockBtn.innerText = "Lock AF";
+                lockBtn.style.background = "rgba(255, 165, 0, 0.2)";
+                lockBtn.style.borderColor = "rgba(255, 165, 0, 0.5)";
+            }
+            
+            const slider = document.getElementById(`focusSlider_${cam_id}`);
+            const valSpan = document.getElementById(`focusVal_${cam_id}`);
+            
+            if (mode === 0) {
+                 slider.style.display = 'block';
+                 valSpan.style.display = 'block';
+                 if (lockBtn) lockBtn.style.display = 'none';
+                 currentCamControls[cam_id]['LensPosition'] = parseFloat(slider.value);
+            } else {
+                 slider.style.display = 'none';
+                 valSpan.style.display = 'none';
+                 if (lockBtn) lockBtn.style.display = 'block';
+            }
+            
+            debouncedSaveCameraControls(cam_id);
+        }
+        
+        async function saveCameraControls(cam_id) {
+            const statusEl = document.getElementById(`saveStatus_${cam_id}`);
+            statusEl.innerText = "Saving...";
+            statusEl.style.color = "var(--text-main)";
+            
+            try {
+                const response = await fetch(`/api/config/${cam_id}/camera_controls`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(currentCamControls[cam_id])
+                });
+                
+                const data = await response.json();
+                if (data.status === 'success') {
+                    statusEl.innerText = "✓ Saved Successfully";
+                    statusEl.style.color = "var(--success-color)";
+                    setTimeout(() => statusEl.innerText = "", 3000);
+                } else {
+                    statusEl.innerText = "Error: " + data.error;
+                    statusEl.style.color = "var(--danger-color)";
+                }
+            } catch (e) {
+                statusEl.innerText = "Failed to connect to server.";
+                statusEl.style.color = "var(--danger-color)";
+            }
+        }
+        
+        // Initialize Controls UI based on backend status
+        async function loadCameraControls(cam_id) {
+            try {
+                const response = await fetch(`/api/config/${cam_id}`);
+                if (!response.ok) return;
+                const config = await response.json();
+                
+                if (config.controls) {
+                    currentCamControls[cam_id] = config.controls;
+                    
+                    if (config.controls.ExposureTime) {
+                        document.getElementById(`shutter_${cam_id}`).value = config.controls.ExposureTime;
+                        document.getElementById(`shutterVal_${cam_id}`).innerText = config.controls.ExposureTime;
+                    }
+                    if (config.controls.AnalogueGain) {
+                        document.getElementById(`iso_${cam_id}`).value = config.controls.AnalogueGain;
+                        document.getElementById(`isoVal_${cam_id}`).innerText = config.controls.AnalogueGain;
+                    }
+                    if (config.controls.AwbEnable !== undefined && config.controls.AwbEnable === false) {
+                         if (config.controls.ColourTemperature) {
+                             document.getElementById(`wb_${cam_id}`).value = config.controls.ColourTemperature;
+                             document.getElementById(`wbVal_${cam_id}`).innerText = config.controls.ColourTemperature;
+                         }
+                    } else {
+                         document.getElementById(`wb_${cam_id}`).value = 5000;
+                         document.getElementById(`wbVal_${cam_id}`).innerText = "Auto";
+                    }
+                    if (config.controls.AfMode !== undefined) {
+                         const fMode = document.getElementById(`focusMode_${cam_id}`);
+                         fMode.value = config.controls.AfMode;
+                         updateFocusMode(cam_id, config.controls.AfMode); // Trigger UI change
+                         
+                         // Re-apply locked state if previously saved
+                         if (config.controls.AfPause === 2 && config.controls.AfMode !== 0) {
+                             afLocked[cam_id] = true;
+                             currentCamControls[cam_id]['AfPause'] = 2; // Preserve in current state
+                             const lockBtn = document.getElementById(`focusLockBtn_${cam_id}`);
+                             if (lockBtn) {
+                                 lockBtn.innerText = "Unlock AF";
+                                 lockBtn.style.background = "rgba(16, 185, 129, 0.2)";
+                                 lockBtn.style.borderColor = "rgba(16, 185, 129, 0.5)";
+                             }
+                         }
+                    }
+                    if (config.controls.LensPosition !== undefined) {
+                         document.getElementById(`focusSlider_${cam_id}`).value = config.controls.LensPosition;
+                         document.getElementById(`focusVal_${cam_id}`).innerText = config.controls.LensPosition;
+                    }
+                }
+            } catch (e) {
+                console.error(`Failed to load initial controls for ${cam_id}:`, e);
+            }
+        }
+
+        // --- Calibration Logic ---
+        const calibModal = document.getElementById('calibModal');
+        const calibCanvas = document.getElementById('calibCanvas');
+        const ctx = calibCanvas.getContext('2d');
+        const calibLoading = document.getElementById('calibLoading');
+        
+        let calibCamId = null;
+        let calibTargetImg = new Image();
+        
+        let alignMarks = []; // {x, y, width, height}
+        let alignCorners = []; // {x, y}
+        let alignStep = 'marks'; // 'marks' or 'corners'
+        let cropRegions = []; // {x, y, width, height}
+        
+        // Drawing state for crop
+        let isDrawing = false;
+        let startX, startY;
+        let currentRect = null;
+
+        async function openCalibration(cam_id) {
+            calibCamId = cam_id;
+            document.getElementById('calibTitle').innerText = `🎯 Calibration Studio (${cam_id.toUpperCase()})`;
+            calibModal.style.display = 'flex';
+            switchCalibTab('align');
+            await captureCalibrationImage();
+        }
+
+        function closeCalibration() {
+            calibModal.style.display = 'none';
+            calibCamId = null;
+            calibTargetImg.src = "";
+            ctx.clearRect(0, 0, calibCanvas.width, calibCanvas.height);
+        }
+
+        function switchCalibTab(mode) {
+            calibMode = mode;
+            document.getElementById('tabAlign').style.background = mode === 'align' ? 'rgba(99, 102, 241, 0.4)' : 'rgba(255, 255, 255, 0.1)';
+            document.getElementById('tabCrop').style.background = mode === 'crop' ? 'rgba(99, 102, 241, 0.4)' : 'rgba(255, 255, 255, 0.1)';
+            
+            document.getElementById('alignOptions').style.display = mode === 'align' ? 'flex' : 'none';
+            
+            switchAlignStep(document.querySelector('input[name="alignStep"]:checked').value);
+            redrawCanvas();
+        }
+
+        function switchAlignStep(step) {
+            if (calibMode !== 'align') return;
+            alignStep = step;
+            const instr = document.getElementById('calibInstruction');
+            if (step === 'marks') {
+                instr.innerText = "Step 1: Click and drag to draw exactly 4 marker boxes around the physical tracking symbols.";
+            } else {
+                instr.innerText = "Step 2: Click exactly 4 corner points indicating the TRUE boundary of your tracking area.";
+            }
+        }
+
+        async function captureCalibrationImage(method = 'manual') {
+            if (!calibCamId) return;
+            calibLoading.style.display = 'flex';
+            
+            if (method === 'mqtt') {
+                calibLoading.innerText = "Waiting for External MQTT Trigger... (Timeout 60s)";
+            } else {
+                calibLoading.innerText = "Capturing...";
+            }
+            
+            try {
+                const endpoint = method === 'mqtt' ? `/api/calibrate/wait/${calibCamId}` : `/api/calibrate/capture/${calibCamId}`;
+                const response = await fetch(endpoint);
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.error || "Capture failed");
+                }
+                
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                
+                calibTargetImg.onload = () => {
+                    // Set canvas internal resolution to match image directly
+                    calibCanvas.width = calibTargetImg.width;
+                    calibCanvas.height = calibTargetImg.height;
+                    
+                    // Reset drawings on new capture
+                    alignMarks = [];
+                    alignCorners = [];
+                    cropRegions = [];
+                    currentRect = null;
+                    
+                    redrawCanvas();
+                    calibLoading.style.display = 'none';
+                    URL.revokeObjectURL(url);
+                };
+                calibTargetImg.src = url;
+            } catch (e) {
+                alert("Error capturing frame: " + e.message);
+                calibLoading.style.display = 'none';
+            }
+        }
+
+        function redrawCanvas() {
+            if (!calibTargetImg.src) return;
+            
+            ctx.clearRect(0, 0, calibCanvas.width, calibCanvas.height);
+            ctx.drawImage(calibTargetImg, 0, 0);
+            
+            // Draw standard config references? Only if we fetched them. 
+            // For now, just draw what user is making.
+            
+            // Draw Alignment Marks (Now Boxes)
+            if (calibMode === 'align' || alignMarks.length > 0) {
+                ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)';
+                ctx.lineWidth = 3;
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
+                
+                alignMarks.forEach((m, idx) => {
+                    ctx.strokeRect(m.x, m.y, m.width, m.height);
+                    ctx.fillRect(m.x, m.y, m.width, m.height);
+                    
+                    ctx.fillStyle = 'white';
+                    ctx.font = '24px Arial';
+                    ctx.fillText("M" + (idx + 1).toString(), m.x + 5, m.y + 25);
+                    ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
+                });
+            }
+            // Draw Alignment Corners
+            if (calibMode === 'align' || alignCorners.length > 0) {
+                ctx.fillStyle = 'rgba(0, 191, 255, 0.8)'; // Deep Sky Blue for corners
+                ctx.font = '30px Arial';
+                alignCorners.forEach((pt, idx) => {
+                    ctx.beginPath();
+                    // Draw a square for corners
+                    ctx.rect(pt.x - 8, pt.y - 8, 16, 16);
+                    ctx.fill();
+                    ctx.fillStyle = 'white';
+                    ctx.fillText("C" + (idx + 1).toString(), pt.x + 15, pt.y - 15);
+                    ctx.fillStyle = 'rgba(0, 191, 255, 0.8)';
+                });
+            }
+            
+            // Draw Crop Regions
+            if (calibMode === 'crop' || cropRegions.length > 0) {
+                ctx.strokeStyle = 'rgba(0, 255, 0, 0.8)';
+                ctx.lineWidth = 4;
+                ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
+                
+                cropRegions.forEach((r, idx) => {
+                    ctx.strokeRect(r.x, r.y, r.width, r.height);
+                    ctx.fillRect(r.x, r.y, r.width, r.height);
+                    
+                    ctx.fillStyle = 'white';
+                    ctx.font = '24px Arial';
+                    ctx.fillText(`Crop ${idx+1}`, r.x + 10, r.y + 30);
+                    ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
+                });
+            }
+            
+            // Draw current drawing rectangle (Live Preview for both Crop and Marks)
+            if (currentRect) {
+                if (calibMode === 'crop') {
+                    ctx.strokeStyle = 'rgba(255, 255, 0, 0.8)';
+                    ctx.fillStyle = 'rgba(255, 255, 0, 0.2)';
+                } else {
+                    ctx.strokeStyle = 'rgba(255, 165, 0, 0.8)'; // Orange for mark drawing
+                    ctx.fillStyle = 'rgba(255, 165, 0, 0.2)';
+                }
+                ctx.strokeRect(currentRect.x, currentRect.y, currentRect.width, currentRect.height);
+                ctx.fillRect(currentRect.x, currentRect.y, currentRect.width, currentRect.height);
+            }
+        }
+
+        function getMousePos(evt) {
+            const rect = calibCanvas.getBoundingClientRect();
+            // Scale mouse coords to internal canvas resolution
+            const scaleX = calibCanvas.width / rect.width;
+            const scaleY = calibCanvas.height / rect.height;
+            return {
+                x: (evt.clientX - rect.left) * scaleX,
+                y: (evt.clientY - rect.top) * scaleY
+            };
+        }
+
+        calibCanvas.addEventListener('mousedown', (e) => {
+            if (!calibTargetImg.src) return;
+            const pos = getMousePos(e);
+            
+            if (calibMode === 'align') {
+                if (alignStep === 'marks') {
+                    if (alignMarks.length < 4) {
+                        isDrawing = true;
+                        startX = pos.x;
+                        startY = pos.y;
+                        currentRect = { x: startX, y: startY, width: 0, height: 0 };
+                    } else {
+                        alert("You already have 4 Marks. Clear or Undo to change them.");
+                    }
+                } else {
+                    // Corners are still points
+                    if (alignCorners.length < 4) {
+                        alignCorners.push({x: Math.round(pos.x), y: Math.round(pos.y)});
+                        redrawCanvas();
+                    } else {
+                        alert("You already have 4 Corners. Clear or Undo to change them.");
+                    }
+                }
+            } else if (calibMode === 'crop') {
+                isDrawing = true;
+                startX = pos.x;
+                startY = pos.y;
+                currentRect = { x: startX, y: startY, width: 0, height: 0 };
+            }
+        });
+
+        calibCanvas.addEventListener('mousemove', (e) => {
+            if (!isDrawing) return;
+            if (calibMode === 'align' && alignStep !== 'marks' && calibMode !== 'crop') return;
+            
+            const pos = getMousePos(e);
+            currentRect.width = pos.x - startX;
+            currentRect.height = pos.y - startY;
+            redrawCanvas();
+        });
+
+        calibCanvas.addEventListener('mouseup', (e) => {
+            if (!isDrawing) return;
+            isDrawing = false;
+            
+            // Normalize negative widths/heights
+            let finalX = currentRect.width < 0 ? currentRect.x + currentRect.width : currentRect.x;
+            let finalY = currentRect.height < 0 ? currentRect.y + currentRect.height : currentRect.y;
+            let finalW = Math.abs(currentRect.width);
+            let finalH = Math.abs(currentRect.height);
+            
+            if (finalW > 10 && finalH > 10) {
+                const box = {
+                    x: Math.round(finalX), 
+                    y: Math.round(finalY), 
+                    width: Math.round(finalW), 
+                    height: Math.round(finalH)
+                };
+                
+                if (calibMode === 'align' && alignStep === 'marks') {
+                    alignMarks.push(box);
+                } else if (calibMode === 'crop') {
+                    cropRegions.push(box);
+                }
+            }
+            currentRect = null;
+            redrawCanvas();
+        });
+        
+        calibCanvas.addEventListener('mouseleave', () => {
+            if (isDrawing) {
+                isDrawing = false;
+                currentRect = null;
+                redrawCanvas();
+            }
+        });
+
+        function clearCalibration() {
+            if (calibMode === 'align') {
+                if (alignStep === 'marks') alignMarks = [];
+                else alignCorners = [];
+            } else {
+                cropRegions = [];
+            }
+            redrawCanvas();
+        }
+
+        function undoCalibration() {
+            if (calibMode === 'align') {
+                if (alignStep === 'marks') alignMarks.pop();
+                else alignCorners.pop();
+            } else {
+                cropRegions.pop();
+            }
+            redrawCanvas();
+        }
+
+        async function saveCalibration() {
+            if (!calibCamId) return;
+            const btn = document.getElementById('saveCalibBtn');
+            const origText = btn.innerText;
+            btn.innerText = "Saving...";
+            
+            try {
+                if (calibMode === 'align') {
+                    if (alignMarks.length !== 4) {
+                        alert("You must define exactly 4 MARKS.");
+                        btn.innerText = origText;
+                        return;
+                    }
+                    if (alignCorners.length > 0 && alignCorners.length !== 4) {
+                        alert("If defining CORNERS, you must define exactly 4 CORNERS. Otherwise, clear them to use marks as corners natively.");
+                        btn.innerText = origText;
+                        return;
+                    }
+                    
+                    // If no explicit corners, use the centers of the marker boxes as corners
+                    let finalCorners = alignCorners;
+                    if (alignCorners.length === 0) {
+                        finalCorners = alignMarks.map(m => ({
+                            x: Math.round(m.x + m.width / 2),
+                            y: Math.round(m.y + m.height / 2)
+                        }));
+                    }
+                    
+                    const payload = {
+                        marks: alignMarks,
+                        corners: finalCorners
+                    };
+                    
+                    const res = await fetch(`/api/calibrate/save_alignment/${calibCamId}`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    if(data.status === 'success') {
+                        alert("Alignment saved successfully!");
+                        closeCalibration();
+                    } else {
+                        alert("Error: " + data.error);
+                    }
+                } else {
+                    if (cropRegions.length === 0) {
+                        alert("No crop regions defined.");
+                        btn.innerText = origText;
+                        return;
+                    }
+                    const res = await fetch(`/api/calibrate/save_crop/${calibCamId}`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            reference_image_size: { width: calibTargetImg.width, height: calibTargetImg.height },
+                            regions: cropRegions
+                        })
+                    });
+                    const data = await res.json();
+                    if(data.status === 'success') {
+                        alert("Crop regions saved successfully!");
+                        closeCalibration();
+                    } else {
+                        alert("Error: " + data.error);
+                    }
+                }
+            } catch(e) {
+                alert("Failed to reach server: " + e.message);
+            }
+            btn.innerText = origText;
+        }
+
+        // Initialize UI on load
+        window.addEventListener('load', () => {
+             checkStatus();
+             setInterval(checkStatus, 5000);
+             
+             // Load initial camera controls from backend configs
+             loadCameraControls('cam0');
+             loadCameraControls('cam1');
+        });
+        
+        // Close modal on outside click
+        window.onclick = function(event) {
+            if (event.target == settingsModal) {
+                closeSettings();
+            }
+        }
+    </script>
+</body>
+</html>

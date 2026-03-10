@@ -4,17 +4,17 @@ import cv2
 import numpy as np
 import argparse
 
-def load_calibration():
+def load_calibration(cam_id="cam0"):
     # Resolve the directory of THIS script (src)
     base_dir = os.path.dirname(os.path.abspath(__file__))
     parent_dir = os.path.dirname(base_dir) # sender_installer
     
     # Check possible places for crop_4point.json
     config_paths = [
-        os.path.join(parent_dir, "configs", "calibration_points.json"),
-        os.path.join(base_dir, "calibration_points.json"),
-        "configs/calibration_points.json",
-        "calibration_points.json"
+        os.path.join(parent_dir, "configs", f"{cam_id}_calibration_points.json"),
+        os.path.join(base_dir, f"{cam_id}_calibration_points.json"),
+        f"configs/{cam_id}_calibration_points.json",
+        f"{cam_id}_calibration_points.json"
     ]
     
     config_path = None
@@ -24,7 +24,7 @@ def load_calibration():
             break
             
     if not config_path:
-        raise ValueError("CRITICAL ERROR: configs/calibration_points.json not found.")
+        raise ValueError(f"CRITICAL ERROR: configs/{cam_id}_calibration_points.json not found.")
     
     with open(config_path, "r") as f:
         config = json.load(f)
@@ -107,9 +107,12 @@ def main():
     calib_corners = config["calibration_corners"]
     
     # Extract reference points (centers of marks in calibration image)
-    ref_mark_points = np.array([[m["x"], m["y"]] for m in calib_marks], dtype=np.float32)
+    ref_mark_points = np.array([
+        [m.get("center_x", m["x"]), m.get("center_y", m["y"])] 
+        for m in calib_marks
+    ], dtype=np.float32)
     
-    # Extract reference corners (points to crop in calibration image)
+    # Extract reference corners (points to crop in calibration image). Corners are still strict {x,y} points.
     ref_corner_points = np.array([[c["x"], c["y"]] for c in calib_corners], dtype=np.float32)
 
     # Output directory for crops

@@ -15,7 +15,10 @@ def calculate_canonical_targets(config):
     calib_corners = config["calibration_corners"]
     
     # 1. Convert to arrays
-    pts_marks = np.array([[m["x"], m["y"]] for m in calib_marks], dtype=np.float32)
+    pts_marks = np.array([
+        [m.get("center_x", m["x"]), m.get("center_y", m["y"])] 
+        for m in calib_marks
+    ], dtype=np.float32)
     pts_corners = np.array([[c["x"], c["y"]] for c in calib_corners], dtype=np.float32)
     
     # 2. Determine Output Size (Width/Height)

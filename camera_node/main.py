@@ -86,10 +86,8 @@ if MQTT_TOPIC_CMD.startswith("wf52/"):
 elif "{hostname}" in MQTT_TOPIC_CMD:
     MQTT_TOPIC_CMD = MQTT_TOPIC_CMD.replace("{hostname}", hostname)
 
-if MQTT_TOPIC_STATUS.startswith("wf52/"):
-    MQTT_TOPIC_STATUS = f"{hostname}/" + MQTT_TOPIC_STATUS.split("/", 1)[1]
-elif "{hostname}" in MQTT_TOPIC_STATUS:
-    MQTT_TOPIC_STATUS = MQTT_TOPIC_STATUS.replace("{hostname}", hostname)
+# Force status topic to be <hostname>/status as requested
+MQTT_TOPIC_STATUS = f"{hostname}/status"
 
 MQTT_USERNAME = config.get("mqtt", {}).get("username", None)
 MQTT_PASSWORD = config.get("mqtt", {}).get("password", None)
@@ -158,9 +156,14 @@ def init_preprocessing():
     if enable_align:
         print("INFO: Loading Calibration Config...")
         try:
-            preproc_config, preproc_templates = cwb.load_calibration()
+            preproc_config, preproc_templates = cwb.load_calibration(f"cam{CAMERA_ID}")
             target_marks, output_size = calculate_canonical_targets(preproc_config)
-            ref_mark_points = np.array([[m["x"], m["y"]] for m in preproc_config["calibration_marks"]], dtype=np.float32)
+            
+            ref_mark_points = np.array([
+                [m.get("center_x", m["x"]), m.get("center_y", m["y"])] 
+                for m in preproc_config["calibration_marks"]
+            ], dtype=np.float32)
+            
             print(f"INFO: Alignment Targets calculated. Output size: {output_size}")
         except Exception as e:
             raise RuntimeError(f"CRITICAL ERROR: Failed to load calibration config: {e}. Program will terminate.")
@@ -169,7 +172,7 @@ def init_preprocessing():
     if enable_crop:
         print("INFO: Loading Mask Config...")
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        mask_config_path = os.path.join(base_dir, "configs", "crop_regions.json")
+        mask_config_path = os.path.join(base_dir, "configs", f"cam{CAMERA_ID}_crop_regions.json")
         
         try:
             with open(mask_config_path, "r") as f:
@@ -695,27 +698,11 @@ def main():
             picam2.start()
             print(f"INFO: Camera started successfully at {current_width}x{current_height}")
             
-            # Apply saved parameters
-            saved_params = config.get("camera_params", {})
-            if saved_params:
-                initial_controls = {}
-                if 'ExposureTime' in saved_params:
-                    initial_controls['ExposureTime'] = int(saved_params['ExposureTime'])
-                if 'AnalogueGain' in saved_params:
-                    initial_controls['AnalogueGain'] = float(saved_params['AnalogueGain'])
-                if 'ColourGains' in saved_params:
-                    gains = saved_params['ColourGains']
-                    if isinstance(gains, list) and len(gains) == 2:
-                         initial_controls['ColourGains'] = (float(gains[0]), float(gains[1]))
-                if 'LensPosition' in saved_params:
-                    initial_controls['LensPosition'] = float(saved_params['LensPosition'])
-                    initial_controls['AfMode'] = 0
-                if 'AfMode' in saved_params:
-                    initial_controls['AfMode'] = int(saved_params['AfMode'])
-                    
-                if initial_controls:
-                    picam2.set_controls(initial_controls)
-                    print(f"INFO: Applied saved camera parameters from config: {initial_controls}")
+            # Apply saved generic parameters
+            controls = config.get("controls", {})
+            if controls:
+                picam2.set_controls(controls)
+                print(f"INFO: Applied camera controls from config: {controls}")
     except Exception as e:
         print(f"CRITICAL: Failed to initialize camera: {e}")
         os._exit(1) # Exit forcefully with an error code to trigger Systemd Restart
@@ -760,6 +747,7 @@ def main():
             current_time = time.time()
             if current_time - last_status_time >= 5.0:
                 status = {
+                    'camera_id': CAMERA_ID,
                     'cpu_temp': round(get_cpu_temperature(), 2),
                     'ram_usage_percent': round(get_ram_usage(), 2),
                     'cpu_usage_percent': round(get_cpu_usage(), 2),
@@ -780,6 +768,7 @@ def main():
                         
                     try:
                         frame = picam2.capture_array()
+                        
                         # Drop old frame if queue is full to maintain real-time
                         if image_queue.full():
                             try:
