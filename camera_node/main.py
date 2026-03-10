@@ -33,8 +33,44 @@ try:
     with open(args.config, 'r') as f:
         config = json.load(f)
 except FileNotFoundError:
-    print(f"CRITICAL: {args.config} not found. Using barebone defaults!")
-    config = {}
+    print(f"CRITICAL: {args.config} not found. Generating fallback configuration for initial calibration!")
+    config = {
+        "tcp": {
+            "ip": "10.10.10.199",
+            "port": 8080 if "cam0" in args.config else 8081
+        },
+        "mqtt": {
+            "broker": "wfmain.local",
+            "port": 1883,
+            "topic_cmd": "camera/command",
+            "topic_status": "camera/status"
+        },
+        "camera": {
+            "id": 0 if "cam0" in args.config else 1,
+            "default_width": 2304,
+            "default_height": 1296,
+            "jpeg_quality": 90,
+            "continuous_stream": False,
+            "stream_interval": 1.0,
+            "loop_delay": 0.05
+        },
+        "preprocessing": {
+            "enable_alignment": False,
+            "enable_shadow_removal": False,
+            "enable_pre_crop": False,
+            "enable_grayscale": False,
+            "enable_clahe": False,
+            "enable_box_cropping": False
+        }
+    }
+    # Auto-save the fallback config so it exists for next time
+    os.makedirs(os.path.dirname(os.path.abspath(args.config)), exist_ok=True)
+    try:
+        with open(args.config, 'w') as f:
+            json.dump(config, f, indent=4)
+        print(f"INFO: Saved fallback configuration to {args.config}")
+    except Exception as e:
+        print(f"ERROR: Failed to save fallback config: {e}")
 
 TCP_IP = config.get("tcp", {}).get("ip", "10.10.10.199")
 TCP_PORT = config.get("tcp", {}).get("port", 8080)
@@ -307,7 +343,17 @@ def pre_process_worker():
             
             # If no configs loaded but we need them, fallback to raw
             if (enable_align and not preproc_config) or (enable_crop and not mask_config):
+                print("INFO: Sending raw image for calibration (Missing JSON configs)")
                 send_image(frame, image_id="raw_image")
+                
+                # Save a high-quality copy locally for offline calibration via SSH
+                calib_out_dir = os.path.join(base_dir, "logs")
+                os.makedirs(calib_out_dir, exist_ok=True)
+                cam_id_str = f"cam{CAMERA_ID}"
+                save_path = os.path.join(calib_out_dir, f"{cam_id_str}_calibration_target.jpg")
+                cv2.imwrite(save_path, frame)
+                print(f"INFO: Saved local calibration image to {save_path}")
+                
                 image_queue.task_done()
                 continue
                 

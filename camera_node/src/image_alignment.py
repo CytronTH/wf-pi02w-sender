@@ -3,7 +3,7 @@ import numpy as np
 import json
 import os
 import argparse
-from .crop_wall_boxes import load_calibration, find_mark
+from .image_cropping import load_calibration, find_mark
 
 def calculate_canonical_targets(config):
     """
