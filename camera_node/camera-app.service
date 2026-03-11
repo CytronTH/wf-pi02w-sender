@@ -6,8 +6,8 @@ After=network.target network-online.target
 Type=simple
 User=CURRENT_USER_PLACEHOLDER
 WorkingDirectory=CURRENT_DIR_PLACEHOLDER
-# Start the camera app using config_cam0.json
-ExecStart=/usr/bin/python3 CURRENT_DIR_PLACEHOLDER/main.py -c CURRENT_DIR_PLACEHOLDER/configs/config_cam0.json
+# Start the camera app
+ExecStart=/usr/bin/python3 CURRENT_DIR_PLACEHOLDER/app.py
 # Auto-restart is crucial for Dual Camera flexibility. 
 # If a camera is unplugged, it will die and keep retrying quietly every 10 seconds.
 Restart=always
