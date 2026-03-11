@@ -53,9 +53,13 @@ def start_picamera(cam_id):
             cam_data["picam2"] = Picamera2(camera_num=cam_data["device_id"])
             
         width, height, controls = get_camera_settings(cam_id)
-        # Use configured dimensions for preview
+        # For Pi Zero 2W, we force a lower resolution (e.g., 640x360) 
+        # for the WebUI preview to prevent out-of-memory or CPU hanging
+        # when capturing and encoding RGB arrays. 
+        # The main TCP Sender will still use the full configured resolution.
+        preview_width, preview_height = 640, 360
         cam_config = cam_data["picam2"].create_preview_configuration(
-            main={'format': 'RGB888', 'size': (width, height)}
+            main={'format': 'RGB888', 'size': (preview_width, preview_height)}
         )
         cam_data["picam2"].configure(cam_config)
         cam_data["picam2"].start()
