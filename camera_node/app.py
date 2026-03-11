@@ -59,7 +59,8 @@ def start_picamera(cam_id):
         # The main TCP Sender will still use the full configured resolution.
         preview_width, preview_height = 640, 360
         cam_config = cam_data["picam2"].create_preview_configuration(
-            main={'format': 'RGB888', 'size': (preview_width, preview_height)}
+            main={'format': 'RGB888', 'size': (preview_width, preview_height)},
+            raw={'format': 'RAW', 'size': (width, height)}
         )
         cam_data["picam2"].configure(cam_config)
         cam_data["picam2"].start()
