@@ -14,19 +14,11 @@ app = Flask(__name__)
 # Base directory for config paths
 base_dir = os.path.dirname(os.path.abspath(__file__))
 
-# Manage state for two cameras independently
+# Manage state for camera
 CAMERAS = {
     "cam0": {
         "device_id": 0,
         "config_path": os.path.join(base_dir, 'configs', 'config_cam0.json'),
-        "mode": "webui",
-        "picam2": None,
-        "tcp_process": None,
-        "lock": threading.Lock()
-    },
-    "cam1": {
-        "device_id": 1,
-        "config_path": os.path.join(base_dir, 'configs', 'config_cam1.json'),
         "mode": "webui",
         "picam2": None,
         "tcp_process": None,

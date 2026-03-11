@@ -554,10 +554,10 @@
 
     <div class="header">
         <h1>{{ hostname }} - Camera Switcher</h1>
-        <p>Manage Picamera2 Stream & Network Sender (Dual Camera)</p>
+        <p>Manage Picamera2 Stream & Network Sender</p>
     </div>
 
-    <!-- Dual Camera Grid -->
+    <!-- Camera Grid -->
     <div class="container dual-grid">
         
         <!-- Camera 0 Panel -->
@@ -617,68 +617,6 @@
                     ⚙️ Config
                 </button>
                 <button class="btn btn-settings" onclick="openCalibration('cam0')" style="background: rgba(168, 85, 247, 0.2); border: 1px solid rgba(168, 85, 247, 0.4);">
-                    🎯 Calibrate
-                </button>
-            </div>
-        </div>
-
-        <!-- Camera 1 Panel -->
-        <div class="card">
-            <h2 id="cameraTitle_cam1" style="text-align: center; margin-bottom: 1rem;">Camera 1</h2>
-            <div class="status-banner" id="statusBanner_cam1">
-                <div class="status-indicator">
-                    <div class="dot" id="statusDot_cam1"></div>
-                    <span id="statusText_cam1">Loading...</span>
-                </div>
-                <div style="font-size: 0.9rem; color: var(--text-muted);" id="pidText_cam1"></div>
-            </div>
-
-            <div class="video-wrapper" id="videoWrapper_cam1">
-                <div class="placeholder-text" id="placeholderText_cam1">
-                    <span class="placeholder-icon">📷</span>
-                    <span>Camera is allocated to TCP Sender<br>Live Stream is paused on WebUI.</span>
-                </div>
-                <img id="videoFeed_cam1" class="video-feed" alt="Live Camera Stream">
-            </div>
-
-            <details class="camera-controls-accordion" id="cameraControls_cam1">
-                <summary>📸 Camera Properties</summary>
-                <div class="controls-panel">
-                    <div class="slider-group">
-                        <label>Shutter Speed (us) <span id="shutterVal_cam1">10000</span></label>
-                        <input type="range" id="shutter_cam1" min="1000" max="60000" step="500" value="10000" oninput="updateCamControl('cam1', 'ExposureTime', this.value)">
-                    </div>
-                    <div class="slider-group">
-                        <label>ISO Gain <span id="isoVal_cam1">2.0</span></label>
-                        <input type="range" id="iso_cam1" min="1.0" max="16.0" step="0.1" value="2.0" oninput="updateCamControl('cam1', 'AnalogueGain', this.value)">
-                    </div>
-                    <div class="slider-group">
-                        <label>White Balance (K) <span id="wbVal_cam1">Auto</span></label>
-                        <input type="range" id="wb_cam1" min="2000" max="10000" step="100" value="5000" oninput="updateWbTemp('cam1', this.value)">
-                        <button class="btn" style="padding: 0.2rem 0.6rem; font-size: 0.75rem; margin-top: 0.2rem; width: fit-content; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);" onclick="updateWbTemp('cam1', 'auto')">Auto WB</button>
-                    </div>
-                    <div class="slider-group">
-                        <label>Focus</label>
-                        <div style="display: flex; gap: 10px; align-items: center;">
-                            <select id="focusMode_cam1" onchange="updateFocusMode('cam1', this.value)" style="flex: 1;">
-                                <option value="2">Autofocus</option>
-                                <option value="0">Manual</option>
-                            </select>
-                            <button id="focusLockBtn_cam1" class="btn" style="padding: 0.2rem 0.6rem; font-size: 0.75rem; background: rgba(255,165,0,0.2); border: 1px solid rgba(255,165,0,0.5); display: none;" onclick="toggleAfLock('cam1')">Lock AF</button>
-                            <input type="range" id="focusSlider_cam1" style="flex: 2; display: none;" min="0.0" max="10.0" step="0.1" value="0.0" oninput="updateCamControl('cam1', 'LensPosition', this.value)">
-                            <span id="focusVal_cam1" style="display: none; width: 30px; text-align: right;">0.0</span>
-                        </div>
-                    <div id="saveStatus_cam1" style="color: var(--success-color); font-size: 0.8rem; text-align: right; margin-top: 0.5rem; min-height: 1.2rem;"></div>
-                </div>
-            </details>
-
-            <div class="controls">
-                <button class="btn btn-webui active" id="btnWebui_cam1" onclick="switchMode('cam1', 'webui')">WebUI Stream</button>
-                <button class="btn btn-tcp" id="btnTcp_cam1" onclick="switchMode('cam1', 'tcp')">TCP Sender</button>
-                <button class="btn btn-settings" onclick="openSettings('cam1')" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);">
-                    ⚙️ Config
-                </button>
-                <button class="btn btn-settings" onclick="openCalibration('cam1')" style="background: rgba(168, 85, 247, 0.2); border: 1px solid rgba(168, 85, 247, 0.4);">
                     🎯 Calibrate
                 </button>
             </div>
@@ -766,8 +704,7 @@
         // Use Javascript Fetch API to talk to backend
         // We initialize modes for both cameras
         let currentMode = {
-            "cam0": "webui",
-            "cam1": "webui"
+            "cam0": "webui"
         }; 
         let currentConfig = null;
         let activeSettingsCam = null; // Tracks which camera settings modal is open
@@ -943,17 +880,6 @@
             html += createInputGroup('Enable Continuous Stream', currentConfig.camera?.continuous_stream || false, 'boolean', 'camera', 'continuous_stream');
             html += '</div>';
 
-            // Preprocessing Section
-            html += '<div class="settings-section"><h3>🛠️ Pre-processing</h3>';
-            const prep = currentConfig.preprocessing || {};
-            html += createInputGroup('Enable Box Cropping', prep.enable_box_cropping || false, 'boolean', 'preprocessing', 'enable_box_cropping');
-            html += createInputGroup('Enable Alignment', prep.enable_alignment || false, 'boolean', 'preprocessing', 'enable_alignment');
-            html += createInputGroup('Enable Shadow Removal', prep.enable_shadow_removal || false, 'boolean', 'preprocessing', 'enable_shadow_removal');
-            html += createInputGroup('Enable Grayscale', prep.enable_grayscale || false, 'boolean', 'preprocessing', 'enable_grayscale');
-            html += createInputGroup('Enable CLAHE', prep.enable_clahe || false, 'boolean', 'preprocessing', 'enable_clahe');
-            html += createInputGroup('Enable Pre-crop', prep.enable_pre_crop || false, 'boolean', 'preprocessing', 'enable_pre_crop');
-            html += '</div>';
-
             document.getElementById('settingsBody').innerHTML = html;
         }
 
@@ -1028,11 +954,10 @@
 
         // --- Camera Controls Logic ---
         let currentCamControls = {
-            'cam0': {},
-            'cam1': {}
+            'cam0': {}
         };
         
-        let afLocked = { 'cam0': false, 'cam1': false };
+        let afLocked = { 'cam0': false };
         let saveTimeout = {};
         
         function toggleAfLock(cam_id) {
@@ -1574,7 +1499,6 @@
              
              // Load initial camera controls from backend configs
              loadCameraControls('cam0');
-             loadCameraControls('cam1');
         });
         
         // Close modal on outside click
