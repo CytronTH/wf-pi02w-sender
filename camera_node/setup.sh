@@ -17,11 +17,9 @@ echo "[3/4] Installing Python dependencies..."
 pip3 install -r requirements.txt --break-system-packages 2>/dev/null || pip3 install -r requirements.txt
 
 # Install Systemd Template Service
-echo "[4/4] Installing Dual Camera Systemd Service..."
+echo "[4/4] Installing Camera Systemd Service..."
 sudo systemctl stop camera-sender@0.service 2>/dev/null || true
-sudo systemctl stop camera-sender@1.service 2>/dev/null || true
 sudo systemctl disable camera-sender@0.service 2>/dev/null || true
-sudo systemctl disable camera-sender@1.service 2>/dev/null || true
 sudo rm -f /etc/systemd/system/camera-sender@.service
 
 # Inject current user and full directory path into the service file
@@ -40,8 +38,4 @@ echo "Setup complete! The service is now template-based."
 echo "To manage Camera 0 (config_cam0.json):"
 echo "  sudo systemctl start camera-sender@0"
 echo "  sudo systemctl enable camera-sender@0"
-echo ""
-echo "To manage Camera 1 (config_cam1.json):"
-echo "  sudo systemctl start camera-sender@1"
-echo "  sudo systemctl enable camera-sender@1"
 echo "========================================="

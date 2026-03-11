@@ -15,11 +15,7 @@ import glob
 import sys
 base_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(base_dir, 'src'))
-
-from src.image_alignment import calculate_canonical_targets, find_mark
-from src.shadow_removal import remove_shadows_divisive
-from src.grayscale_filter import cv2 as dummy_cv2
-import src.image_cropping as cwb
+# Pre-processing modules removed for Pi Zero 2W performance
 
 # --- Configuration Loader ---
 parser = argparse.ArgumentParser(description="Camera Sender Script")
@@ -110,14 +106,8 @@ capture_lock = threading.Lock()
 image_queue = Queue(maxsize=7) # Limit queue size to avoid OOM
 last_mock_image_name = None # Track the current mock image name
 
-# Image Processing config
-preproc_config = None
-preproc_templates = None
-mask_config = None
-target_marks = None
-output_size = None
-ref_mark_points = None
-clahe_obj = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+# Raw Image Sending Mode Configuration
+# (Pre-processing disabled for Pi Zero 2W performance)
 
 class MockCamera:
     def __init__(self, image_dir):
@@ -144,42 +134,7 @@ class MockCamera:
     def create_preview_configuration(self, main): return {}
     def set_controls(self, controls): pass
 
-def init_preprocessing():
-    global preproc_config, preproc_templates, mask_config
-    global target_marks, output_size, ref_mark_points
-    
-    prep_config = config.get("preprocessing", {})
-    enable_align = prep_config.get("enable_alignment", True)
-    enable_crop = prep_config.get("enable_box_cropping", True)
-    
-    # 1. Load Alignment Config
-    if enable_align:
-        print("INFO: Loading Calibration Config...")
-        try:
-            preproc_config, preproc_templates = cwb.load_calibration(f"cam{CAMERA_ID}")
-            target_marks, output_size = calculate_canonical_targets(preproc_config)
-            
-            ref_mark_points = np.array([
-                [m.get("center_x", m["x"]), m.get("center_y", m["y"])] 
-                for m in preproc_config["calibration_marks"]
-            ], dtype=np.float32)
-            
-            print(f"INFO: Alignment Targets calculated. Output size: {output_size}")
-        except Exception as e:
-            raise RuntimeError(f"CRITICAL ERROR: Failed to load calibration config: {e}. Program will terminate.")
-        
-    # 2. Load Mask Config
-    if enable_crop:
-        print("INFO: Loading Mask Config...")
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        mask_config_path = os.path.join(base_dir, "configs", f"cam{CAMERA_ID}_crop_regions.json")
-        
-        try:
-            with open(mask_config_path, "r") as f:
-                mask_config = json.load(f)
-            print(f"INFO: Loaded mask config with {len(mask_config.get('mask_regions', []))} regions.")
-        except Exception as e:
-            raise RuntimeError(f"CRITICAL ERROR: Failed to load mask config: {e}. Program will terminate.")
+# init_preprocessing removed for raw image sending
 
 def get_cpu_temperature():
     """Reads CPU temperature from system files."""
@@ -328,256 +283,20 @@ def send_image(frame, image_id="raw_image"):
     except Exception as e:
         print(f"ERROR: Unexpected error during send: {e}")
 
-def pre_process_worker():
-    """ Worker thread to process images from the queue and send them. """
-    global target_marks, output_size, ref_mark_points, preproc_templates, mask_config, clahe_obj
-    
-    print("INFO: Pre-processing worker thread started.")
+def image_sender_worker():
+    """ Worker thread to process raw images from the queue and send them directly. """
+    print("INFO: Image sender worker thread started.")
     while True:
         try:
             frame = image_queue.get()
             
-            prep_config = config.get("preprocessing", {})
-            enable_align = prep_config.get("enable_alignment", True)
-            enable_shadow = prep_config.get("enable_shadow_removal", True)
-            enable_gray = prep_config.get("enable_grayscale", True)
-            enable_clahe = prep_config.get("enable_clahe", True)
-            enable_crop = prep_config.get("enable_box_cropping", True)
+            # In raw mode for Pi Zero 2W, we just send the image directly
+            # without running any heavy OpenCV pre-processing algorithms.
+            send_image(frame, image_id="raw_image")
             
-            # Check if we should fallback to just sending/saving raw images.
-            # This happens if:
-            # 1. We want alignment/cropping but the configs were not found
-            # 2. Both alignment and cropping are explicitly disabled (e.g. from Fallback Config)
-            missing_configs = (enable_align and not preproc_config) or (enable_crop and not mask_config)
-            calibration_mode_active = (not enable_align) and (not enable_crop)
-            
-            if missing_configs or calibration_mode_active:
-                if missing_configs:
-                    print("INFO: Sending raw image for calibration (Missing JSON configs)")
-                else:
-                    print("INFO: Sending raw image for calibration (Calibration Mode Active)")
-                    
-                send_image(frame, image_id="raw_image")
-                
-                # Save a high-quality copy locally for offline calibration via SSH
-                calib_out_dir = os.path.join(base_dir, "logs")
-                os.makedirs(calib_out_dir, exist_ok=True)
-                cam_id_str = f"cam{CAMERA_ID}"
-                save_path = os.path.join(calib_out_dir, f"{cam_id_str}_calibration_target.jpg")
-                cv2.imwrite(save_path, frame)
-                print(f"INFO: Saved local calibration image to {save_path}")
-                
-                image_queue.task_done()
-                continue
-                
-            # --- 1. Alignment ---
-            if enable_align:
-                img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                found_marks = []
-                
-                # Create a debug image if requested
-                debug_img = frame.copy() if args.debug_align else None
-                
-                tmpl1 = cv2.cvtColor(preproc_templates[0], cv2.COLOR_BGR2GRAY)
-                loc, score = find_mark(img_gray, tmpl1)
-                
-                if score < 0.5:
-                    if debug_img is not None:
-                        save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", f"debug_align_fail_m1_{int(time.time()*100)}.jpg")
-                        cv2.imwrite(save_path, debug_img)
-                    raise ValueError("Mark 1 not found. Alignment failed.")
-                    
-                th, tw = tmpl1.shape
-                m1_cx, m1_cy = loc[0] + tw//2, loc[1] + th//2
-                found_marks.append([m1_cx, m1_cy])
-                
-                if debug_img is not None:
-                    cv2.rectangle(debug_img, loc, (loc[0] + tw, loc[1] + th), (0, 255, 0), 2)
-                    cv2.circle(debug_img, (int(m1_cx), int(m1_cy)), 5, (0, 0, 255), -1)
-                    cv2.putText(debug_img, "M1", (loc[0], loc[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-                
-                ref_m1 = ref_mark_points[0]
-                valid = True
-                
-                for i in range(1, 4):
-                    tmpl = cv2.cvtColor(preproc_templates[i], cv2.COLOR_BGR2GRAY)
-                    ref_m = ref_mark_points[i]
-                    dx, dy = ref_m[0] - ref_m1[0], ref_m[1] - ref_m1[1]
-                    exp_cx, exp_cy = m1_cx + dx, m1_cy + dy
-                    
-                    th_i, tw_i = tmpl.shape
-                    search_pad_x, search_pad_y = 200, 200 # พิกเซลที่บวกเพิ่มด้านละ
-                    w_box = tw_i + (search_pad_x * 2)
-                    h_box = th_i + (search_pad_y * 2)
-                    
-                    roi_x, roi_y = int(exp_cx - w_box/2), int(exp_cy - h_box/2)
-                    roi_rect = (roi_x, roi_y, w_box, h_box)
-                    
-                    if debug_img is not None:
-                        cv2.rectangle(debug_img, (roi_x, roi_y), (roi_x + w_box, roi_y + h_box), (255, 0, 0), 2)
-                        cv2.putText(debug_img, f"ROI M{i+1}", (roi_x, roi_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-    
-                    loc_i, score_i = find_mark(img_gray, tmpl, roi_rect)
-                    
-                    if score_i < 0.4:
-                        if debug_img is not None:
-                            save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", f"debug_align_fail_m{i+1}_{int(time.time()*100)}.jpg")
-                            cv2.imwrite(save_path, debug_img)
-                        raise ValueError(f"Mark {i+1} not found. Alignment failed.")
-                        
-                    found_cx = loc_i[0] + tw_i//2
-                    found_cy = loc_i[1] + th_i//2
-                    found_marks.append([found_cx, found_cy])
-                    
-                    if debug_img is not None:
-                        cv2.rectangle(debug_img, loc_i, (loc_i[0] + tw_i, loc_i[1] + th_i), (0, 255, 0), 2)
-                        cv2.circle(debug_img, (int(found_cx), int(found_cy)), 5, (0, 0, 255), -1)
-                        cv2.putText(debug_img, f"M{i+1}", (loc_i[0], loc_i[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-                        
-                if debug_img is not None:
-                    base_name = last_mock_image_name if (last_mock_image_name and args.mock_dir) else f"{int(time.time()*100)}"
-                    save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", f"debug_align_success_{base_name}.jpg")
-                    cv2.imwrite(save_path, debug_img)
-                    
-                input_marks = np.array(found_marks, dtype=np.float32)
-                H, _ = cv2.findHomography(input_marks, target_marks, cv2.RANSAC, 5.0)
-                
-                if H is None:
-                    raise ValueError("Homography Matrix calculation failed.")
-                    
-                aligned_img = cv2.warpPerspective(frame, H, output_size)
-            else:
-                aligned_img = frame.copy()
-            
-            # --- 2. Shadow Removal ---
-            if enable_shadow:
-                shadow_removed = remove_shadows_divisive(aligned_img, sigma=50)
-                if shadow_removed is None:
-                    shadow_removed = aligned_img
-            else:
-                shadow_removed = aligned_img
-                
-            # --- 2.5 Pre-Crop ---
-            c_top = c_bottom = c_left = c_right = 0
-            enable_pre_crop = prep_config.get("enable_pre_crop", False)
-            if enable_pre_crop:
-                crop_cfg = prep_config.get("pre_crop", {})
-                c_top = int(crop_cfg.get("top", 0))
-                c_bottom = int(crop_cfg.get("bottom", 0))
-                c_left = int(crop_cfg.get("left", 0))
-                c_right = int(crop_cfg.get("right", 0))
-                
-                h, w = shadow_removed.shape[:2]
-                
-                c_top = max(0, min(c_top, h - 1))
-                c_bottom = max(0, min(c_bottom, h - 1 - c_top))
-                c_left = max(0, min(c_left, w - 1))
-                c_right = max(0, min(c_right, w - 1 - c_left))
-                
-                pre_cropped = shadow_removed[c_top:h-c_bottom, c_left:w-c_right]
-            else:
-                pre_cropped = shadow_removed
-
-            # --- 3. Grayscale & CLAHE ---
-            if enable_gray:
-                gray_img = cv2.cvtColor(pre_cropped, cv2.COLOR_BGR2GRAY)
-                
-                if enable_clahe and not args.disable_clahe:
-                    processed_gray = clahe_obj.apply(gray_img)
-                else:
-                    processed_gray = gray_img
-                    
-                # TCP expects 3 channels for current send_image encoding / viewing, convert back
-                final_surface = cv2.cvtColor(processed_gray, cv2.COLOR_GRAY2BGR)
-            else:
-                final_surface = pre_cropped
-            
-            # --- 4. Process Masks & Crops ---
-            images_to_send = []
-            masked_surface = final_surface.copy()
-            
-            if enable_crop and mask_config:
-                h_out, w_out = masked_surface.shape[:2]
-                
-                # Map coordinates from original JSON size to current output size
-                # Reference size here should be compared directly to the current image size (w_out, h_out)
-                # without caring if it was pre-cropped or not. Users want coordinates to remain fixed to the frame.
-                ref_size = mask_config.get("reference_image_size", {})
-                ref_w = ref_size.get("width", w_out)
-                ref_h = ref_size.get("height", h_out)
-                
-                offset_x = (w_out - ref_w) // 2
-                offset_y = (h_out - ref_h) // 2
-                
-                mask_regions = mask_config.get("mask_regions", [])
-                for region in mask_regions:
-                    # Apply absolute offset correctly based on padding differences 
-                    # from the mask config reference, ignoring any pre_crop shift.
-                    rx = int(region["x"] + offset_x)
-                    ry = int(region["y"] + offset_y)
-                    rw = int(region["w"])
-                    rh = int(region["h"])
-                    
-                    # Boundary checks
-                    # Map rx, ry to inside the image safely
-                    crop_x1 = max(0, rx)
-                    crop_y1 = max(0, ry)
-                    crop_x2 = min(w_out, rx + rw)
-                    crop_y2 = min(h_out, ry + rh)
-                    
-                    if crop_x2 > crop_x1 and crop_y2 > crop_y1:
-                        mark_crop = final_surface[crop_y1:crop_y2, crop_x1:crop_x2]
-                        # Support sending with the name specified in the config if available
-                        raw_id = region.get("id", f"mask_{len(images_to_send) + 1}")
-                        crop_id = raw_id.replace("mask_", "crop_") if raw_id.startswith("mask_") else raw_id
-                        images_to_send.append((crop_id, mark_crop))
-                        
-                    # Mask Surface
-                    cv2.rectangle(masked_surface, (rx, ry), (rx+rw, ry+rh), (0, 0, 0), -1)
-                
-            # --- 5. Send ALL Images Sequential Stream Protocol ---
-            if args.debug_align:
-                # สร้างโฟลเดอร์สำหรับเก็บภาพทดสอบชั่วคราว
-                debug_out_dir = os.path.join(base_dir, "logs")
-                os.makedirs(debug_out_dir, exist_ok=True)
-                base_name = last_mock_image_name if (last_mock_image_name and args.mock_dir) else f"{int(time.time()*100)}"
-                cv2.imwrite(os.path.join(debug_out_dir, f"preproc_{base_name}_masked_surface.jpg"), masked_surface)
-            
-            # Send the main masked surface first
-            total_to_send = 1 + len(images_to_send)
-            if enable_pre_crop:
-                total_to_send += 1
-                
-            print(f"INFO: Pre-processing complete. {total_to_send} images prepared for sending.")
-            send_image(masked_surface, image_id="masked_surface")
-            
-            if enable_pre_crop:
-                # Send the pre-cropped version before the small crops
-                if args.debug_align:
-                    cv2.imwrite(os.path.join(debug_out_dir, f"preproc_{base_name}_pre_crop.jpg"), pre_cropped)
-                # Currently pre_cropped is generated in Step 2.5
-                send_image(pre_cropped, image_id="pre_crop")
-            
-            if enable_crop:
-                # Followed by all the crops (Should be 6 crops based on user config)
-                # The receiver will get id="mask_1", "mask_2", etc as defined in masks.json
-                for crop_id, crop in images_to_send:
-                    if args.debug_align:
-                        cv2.imwrite(os.path.join(debug_out_dir, f"preproc_{base_name}_{crop_id}.jpg"), crop)
-                    send_image(crop, image_id=crop_id)
-                
             image_queue.task_done()
-            
-        except ValueError as e:
-            if args.mock_dir:
-                img_name = last_mock_image_name if last_mock_image_name else "Unknown"
-                print(f"⚠️ MOCK WARNING: Skipping image '{img_name}': {e}")
-                image_queue.task_done()
-            else:
-                print(f"⚠️ ALIGNMENT WARNING: Pre-processing skipped this frame: {e}")
-                image_queue.task_done()
         except Exception as e:
-            print(f"CRITICAL ERROR: Unexpected Pre-processing worker failure: {e}")
+            print(f"CRITICAL ERROR: Unexpected Image Sender worker failure: {e}")
             os._exit(1) # Force exit immediately if there is a fatal error in the thread
 
 def on_mqtt_connect(client, userdata, flags, rc):
@@ -707,15 +426,8 @@ def main():
         print(f"CRITICAL: Failed to initialize camera: {e}")
         os._exit(1) # Exit forcefully with an error code to trigger Systemd Restart
 
-    # 1.5 Initialize Pre-processing (Will stop program if fails)
-    try:
-        init_preprocessing()
-    except Exception as e:
-        print(e)
-        os._exit(1)
-    
-    # Start worker thread
-    worker = threading.Thread(target=pre_process_worker, daemon=True)
+    # Start worker thread for sending images
+    worker = threading.Thread(target=image_sender_worker, daemon=True)
     worker.start()
 
     # 2. Initialize MQTT
