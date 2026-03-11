@@ -12,7 +12,7 @@
 └── camera_node/
     ├── main.py                     # สคริปต์หลัก (Main Camera Node) - สำหรับส่ง Raw Image
     ├── setup.sh                    # สคริปต์ติดตั้ง Systemd Service  
-    ├── camera-app@.service         # Systemd Template Service
+    ├── camera-app.service          # Systemd Service
     ├── requirements.txt            # Python Dependencies
     │
     ├── configs/                    # ไฟล์ตั้งค่าของระบบ
@@ -60,7 +60,7 @@
 
 ## 🚀 2. การวิ่งระบบในโหมดจริง
 
-ระบบใช้ **Systemd Template Service (`camera-app@.service`)** ซึ่งจะรันรหัสกล้อง `@0` แยกเป็นอิสระ
+ระบบใช้ **Systemd Service (`camera-app.service`)**
 
 ### ติดตั้ง Service ครั้งแรก:
 ```bash
@@ -72,10 +72,10 @@ chmod +x setup.sh
 ### คำสั่งจัดการ Service:
 | คำสั่ง | ผล |
 |---|---|
-| `sudo systemctl start camera-app@0` | เริ่มทำงานกล้อง 0 |
-| `sudo systemctl stop camera-app@0` | หยุดการทำงานกล้อง 0 |
-| `sudo systemctl status camera-app@0` | ดูสถานะและเช็ค error |
-| `journalctl -u camera-app@0 -f` | ดู Log แบบ Real-time |
+| `sudo systemctl start camera-app` | เริ่มทำงานกล้อง 0 |
+| `sudo systemctl stop camera-app` | หยุดการทำงานกล้อง 0 |
+| `sudo systemctl status camera-app` | ดูสถานะและเช็ค error |
+| `journalctl -u camera-app -f` | ดู Log แบบ Real-time |
 
 ---
 
