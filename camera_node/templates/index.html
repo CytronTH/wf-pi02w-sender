@@ -222,6 +222,40 @@
             box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
         }
         
+        /* Log Box Styles */
+        .log-box {
+            width: 100%;
+            height: 200px;
+            background-color: #000;
+            color: #10b981; /* Default success green */
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.85rem;
+            padding: 1rem;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            overflow-y: auto;
+            margin-top: 1rem;
+            display: none; /* Shown via JS only in TCP mode */
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+            line-height: 1.4;
+        }
+        
+        .log-box div {
+            word-wrap: break-word;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            padding: 2px 0;
+        }
+        
+        .log-error {
+            color: #ef4444; 
+        }
+        .log-warning {
+            color: #eab308;
+        }
+        .log-info {
+            color: #3b82f6;
+        }
+        
         .btn.active {
             box-shadow: inset 0 3px 6px rgba(0,0,0,0.3);
             border: 2px solid rgba(255,255,255,0.3);
@@ -579,6 +613,9 @@
                 <img id="videoFeed_cam0" class="video-feed" alt="Live Camera Stream">
             </div>
 
+            <!-- Terminal Log Box -->
+            <div class="log-box" id="logBox_cam0"></div>
+
             <details class="camera-controls-accordion" id="cameraControls_cam0">
                 <summary>📸 Camera Properties</summary>
                 <div class="controls-panel">
@@ -728,6 +765,7 @@
             const pidText = document.getElementById(`pidText_${cam_id}`);
             const btnWebui = document.getElementById(`btnWebui_${cam_id}`);
             const btnTcp = document.getElementById(`btnTcp_${cam_id}`);
+            const logBox = document.getElementById(`logBox_${cam_id}`);
             
             if (mode === 'webui') {
                 btnWebui.classList.add('active');
@@ -736,6 +774,7 @@
                 statusText.innerText = "WebUI Live Stream (Active)";
                 pidText.innerText = "";
                 placeholderText.style.display = 'none';
+                logBox.style.display = 'none';
                 videoFeed.style.display = 'block';
                 
                 // Only refresh image if it's currently hidden or src is empty to prevent flicker
@@ -749,6 +788,7 @@
                 statusText.innerText = "TCP Sender (Active Backend Process)";
                 pidText.innerText = tcpPid ? `PID: ${tcpPid}` : "Running";
                 videoFeed.style.display = 'none';
+                logBox.style.display = 'block';
                 
                 // Instead of setting src = "", which browsers resolve to current URL, 
                 // just clear attribute to stop fetching
@@ -802,6 +842,48 @@
             } catch (error) {
                 console.error("Error fetching status:", error);
                 setTimeout(checkStatus, 3000);
+            }
+        }
+
+        // --- Log Fetching Logic ---
+        let lastLogCounts = {};
+        
+        async function fetchLogs() {
+            for (const [cam_id, mode] of Object.entries(currentMode)) {
+                if (mode === 'tcp') {
+                    try {
+                        const response = await fetch(`/api/logs/${cam_id}`);
+                        if (response.ok) {
+                            const logs = await response.json();
+                            const logBox = document.getElementById(`logBox_${cam_id}`);
+                            
+                            // Only update UI if we have new logs or count changed
+                            if (!lastLogCounts[cam_id] || lastLogCounts[cam_id] !== logs.length) {
+                                // Save scroll position checking
+                                const isScrolledToBottom = logBox.scrollHeight - logBox.clientHeight <= logBox.scrollTop + 20;
+                                
+                                let html = "";
+                                logs.forEach(line => {
+                                    let cssClass = "";
+                                    if (line.includes("ERROR") || line.includes("CRITICAL")) cssClass = "log-error";
+                                    else if (line.includes("WARNING")) cssClass = "log-warning";
+                                    else if (line.includes("INFO")) cssClass = "log-info";
+                                    html += `<div class="${cssClass}">${line}</div>`;
+                                });
+                                
+                                logBox.innerHTML = html;
+                                lastLogCounts[cam_id] = logs.length;
+                                
+                                // Auto-scroll to bottom if user hasn't scrolled up manually
+                                if (isScrolledToBottom || html === "") {
+                                    logBox.scrollTop = logBox.scrollHeight;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error(`Failed to fetch logs for ${cam_id}`, e);
+                    }
+                }
             }
         }
 
@@ -1496,6 +1578,7 @@
         window.addEventListener('load', () => {
              checkStatus();
              setInterval(checkStatus, 5000);
+             setInterval(fetchLogs, 1500); // Fetch logs every 1.5 seconds
              
              // Load initial camera controls from backend configs
              loadCameraControls('cam0');

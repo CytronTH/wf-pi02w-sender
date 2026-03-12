@@ -5,6 +5,7 @@ import threading
 import subprocess
 import cv2
 import socket
+import collections
 from flask import Flask, render_template, Response, jsonify, request, send_file
 from picamera2 import Picamera2
 
@@ -22,6 +23,7 @@ CAMERAS = {
         "mode": "webui",
         "picam2": None,
         "tcp_process": None,
+        "logs": collections.deque(maxlen=200),
         "lock": threading.Lock()
     }
 }
@@ -102,6 +104,13 @@ def stop_picamera(cam_id):
             cam_data["picam2"] = None
             print(f"INFO: Picamera2 ({cam_id}) stopped and camera resource released.")
 
+def stream_reader(process, logs_queue):
+    """Reads stdout from a subprocess and puts it into a deque."""
+    for line in iter(process.stdout.readline, ''):
+        if line:
+            logs_queue.append(line.rstrip())
+    process.stdout.close()
+
 def start_tcp_sender(cam_id):
     """Start the main.py script as a subprocess for a specific camera."""
     cam_data = CAMERAS[cam_id]
@@ -109,11 +118,20 @@ def start_tcp_sender(cam_id):
     
     if cam_data["tcp_process"] is None or cam_data["tcp_process"].poll() is not None:
         print(f"INFO: Starting TCP Sender Subprocess ({cam_id}): python3 main.py -c {cfg_path}")
+        cam_data["logs"].clear()
         try:
             cam_data["tcp_process"] = subprocess.Popen(
-                ['python3', 'main.py', '-c', cfg_path],
-                cwd=base_dir
+                ['python3', '-u', 'main.py', '-c', cfg_path], # Make python stdout unbuffered
+                cwd=base_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
             )
+            # Start reader daemon thread
+            t = threading.Thread(target=stream_reader, args=(cam_data["tcp_process"], cam_data["logs"]), daemon=True)
+            t.start()
+            
             print(f"INFO: TCP Sender ({cam_id}) started with PID {cam_data['tcp_process'].pid}")
             return True
         except Exception as e:
@@ -126,6 +144,7 @@ def stop_tcp_sender(cam_id):
     cam_data = CAMERAS[cam_id]
     print(f"INFO: Stopping TCP Sender Subprocess ({cam_id})...")
     if cam_data["tcp_process"] is not None and cam_data["tcp_process"].poll() is None:
+        cam_data["logs"].append(f"INFO: Stopping TCP process PID {cam_data['tcp_process'].pid}...")
         try:
             cam_data["tcp_process"].terminate()
             try:
@@ -135,8 +154,10 @@ def stop_tcp_sender(cam_id):
                 cam_data["tcp_process"].kill()
         except Exception as e:
             print(f"Warning: Error while killing TCP Sender {cam_id}: {e}")
+            cam_data["logs"].append(f"ERROR: Stop failed exception: {str(e)}")
         finally:
             print(f"INFO: TCP Sender ({cam_id}) stopped.")
+            cam_data["logs"].append(f"INFO: Stopped TCP process.")
     cam_data["tcp_process"] = None
 
 # --- Camera Generator ---
@@ -185,6 +206,13 @@ def generate_frames(cam_id):
                 time.sleep(1)
 
 # --- API Routes for Config ---
+@app.route('/api/logs/<cam_id>', methods=['GET'])
+def get_logs(cam_id):
+    """Return the recent subprocess logs for a specific camera."""
+    if cam_id not in CAMERAS:
+        return jsonify({"error": "Invalid camera ID"}), 400
+    return jsonify(list(CAMERAS[cam_id]["logs"]))
+
 @app.route('/api/config/<cam_id>', methods=['GET'])
 def get_config(cam_id):
     """Returns the current config from disk."""
