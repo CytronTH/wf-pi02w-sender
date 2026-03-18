@@ -8,6 +8,8 @@ import socket
 import collections
 from flask import Flask, render_template, Response, jsonify, request, send_file
 from picamera2 import Picamera2
+import psutil
+import datetime
 
 app = Flask(__name__)
 
@@ -538,6 +540,31 @@ def save_crop(cam_id):
         return jsonify({"error": str(e)}), 500
 
 # --- Routes ---
+@app.route('/api/system_stats', methods=['GET'])
+def system_stats():
+    try:
+        cpu = psutil.cpu_percent(interval=0.1)
+        ram = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        
+        try:
+            with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+                temp_c = float(f.read().strip()) / 1000.0
+        except Exception:
+            temp_c = 0.0
+
+        return jsonify({
+            "status": "success",
+            "cpu": cpu,
+            "ram": ram.percent,
+            "temp": round(temp_c, 1),
+            "disk_percent": disk.percent,
+            "disk_free_gb": round(disk.free / (1024**3), 1),
+            "disk_total_gb": round(disk.total / (1024**3), 1)
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @app.route('/favicon.ico')
 def favicon():
     return '', 204
@@ -575,6 +602,16 @@ def get_camera_display_name(cam_id):
     except:
         pass
     return display_name
+
+@app.route('/debug/<cam_id>')
+def debug_view(cam_id):
+    """Serve the debug log viewer page."""
+    if cam_id not in CAMERAS:
+        return "Camera ID not found", 404
+    hostname = socket.gethostname()
+    display_name = get_camera_display_name(cam_id)
+    server_start_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return render_template('debug.html', cam_id=cam_id, hostname=hostname, display_name=display_name, start_time=server_start_time)
 
 @app.route('/status')
 def status():
