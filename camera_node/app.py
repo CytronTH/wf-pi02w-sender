@@ -345,7 +345,7 @@ def calibrate_capture(cam_id):
                 
                 broker = config.get("mqtt", {}).get("broker", "localhost")
                 port = config.get("mqtt", {}).get("port", 1883)
-                topic = config.get("mqtt", {}).get("topic_cmd", f"wf51/w/command/{cam_id}")
+                topic = config.get("mqtt", {}).get("topic_cmd", f"{socket.gethostname()}/w/command/{cam_id}")
                 user = config.get("mqtt", {}).get("username", "")
                 password = config.get("mqtt", {}).get("password", "")
                 
@@ -384,7 +384,7 @@ def calibrate_wait(cam_id):
             
         broker = config.get("mqtt", {}).get("broker", "localhost")
         port = config.get("mqtt", {}).get("port", 1883)
-        topic = config.get("mqtt", {}).get("topic_cmd", f"wf51/w/command/{cam_id}")
+        topic = config.get("mqtt", {}).get("topic_cmd", f"{socket.gethostname()}/w/command/{cam_id}")
         user = config.get("mqtt", {}).get("username", "")
         password = config.get("mqtt", {}).get("password", "")
         

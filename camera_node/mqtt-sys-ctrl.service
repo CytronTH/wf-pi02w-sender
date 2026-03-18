@@ -6,8 +6,8 @@ After=network.target
 Environment=PYTHONUNBUFFERED=1
 Type=simple
 User=root
-WorkingDirectory=/home/wf51/pi02w_sender/camera_node
-ExecStart=/usr/bin/python3 /home/wf51/pi02w_sender/camera_node/mqtt_sys_ctrl.py
+WorkingDirectory=/home/%H/pi02w_sender/camera_node
+ExecStart=/usr/bin/python3 /home/%H/pi02w_sender/camera_node/mqtt_sys_ctrl.py
 Restart=always
 RestartSec=5
 
