@@ -22,7 +22,7 @@ CAMERAS = {
     "cam0": {
         "device_id": 0,
         "config_path": os.path.join(base_dir, 'configs', 'config_cam0.json'),
-        "mode": "webui",
+        "mode": "tcp",
         "picam2": None,
         "tcp_process": None,
         "logs": collections.deque(maxlen=200),
@@ -242,7 +242,7 @@ def save_config(cam_id):
         if not new_config:
             return jsonify({"error": "No JSON payload provided"}), 400
             
-        required_sections = ["tcp", "mqtt", "camera", "preprocessing"]
+        required_sections = ["tcp", "mqtt", "camera"]
         for section in required_sections:
             if section not in new_config:
                 new_config[section] = {}
@@ -314,230 +314,7 @@ def update_camera_controls(cam_id):
         print(f"ERROR updating camera controls for {cam_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/calibrate/capture/<cam_id>', methods=['GET'])
-def calibrate_capture(cam_id):
-    """Capture a high-res frame for calibration."""
-    if cam_id not in CAMERAS:
-        return jsonify({"error": "Invalid camera ID"}), 400
-        
-    cam_data = CAMERAS[cam_id]
-    save_path = os.path.join(base_dir, "logs", f"{cam_id}_calibration_target.jpg")
-    
-    with cam_data["lock"]:
-        if cam_data["mode"] == 'webui':
-            if cam_data["picam2"] is None:
-                return jsonify({"error": "Camera not running"}), 500
-                
-            try:
-                # Capture high-res frame
-                frame = cam_data["picam2"].capture_array()
-                os.makedirs(os.path.dirname(save_path), exist_ok=True)
-                cv2.imwrite(save_path, frame)
-                return send_file(save_path, mimetype='image/jpeg')
-            except Exception as e:
-                return jsonify({"error": str(e)}), 500
-        else:
-            # TCP Mode - trigger via MQTT
-            try:
-                cfg_path = cam_data["config_path"]
-                with open(cfg_path, 'r') as f:
-                    config = json.load(f)
-                
-                broker = config.get("mqtt", {}).get("broker", "localhost")
-                port = config.get("mqtt", {}).get("port", 1883)
-                topic = config.get("mqtt", {}).get("topic_cmd", f"{socket.gethostname()}/w/command/{cam_id}")
-                user = config.get("mqtt", {}).get("username", "")
-                password = config.get("mqtt", {}).get("password", "")
-                
-                import paho.mqtt.client as mqtt
-                client = mqtt.Client()
-                if user and password:
-                    client.username_pw_set(user, password)
-                client.connect(broker, port, 60)
-                client.publish(topic, json.dumps({"action": "capture"}))
-                client.disconnect()
-                
-                # Wait for file to update (max 3 seconds)
-                start_mtime = os.path.getmtime(save_path) if os.path.exists(save_path) else 0
-                for _ in range(30):
-                    time.sleep(0.1)
-                    if os.path.exists(save_path) and os.path.getmtime(save_path) > start_mtime:
-                        return send_file(save_path, mimetype='image/jpeg')
-                        
-                return jsonify({"error": "Timeout waiting for TCP Sender to capture image"}), 504
-            except Exception as e:
-                return jsonify({"error": f"MQTT trigger failed: {e}"}), 500
-
-@app.route('/api/calibrate/wait/<cam_id>', methods=['GET'])
-def calibrate_wait(cam_id):
-    """Wait for an external MQTT capture trigger."""
-    if cam_id not in CAMERAS:
-        return jsonify({"error": "Invalid camera ID"}), 400
-        
-    cam_data = CAMERAS[cam_id]
-    save_path = os.path.join(base_dir, "logs", f"{cam_id}_calibration_target.jpg")
-    
-    try:
-        cfg_path = cam_data["config_path"]
-        with open(cfg_path, 'r') as f:
-            config = json.load(f)
-            
-        broker = config.get("mqtt", {}).get("broker", "localhost")
-        port = config.get("mqtt", {}).get("port", 1883)
-        topic = config.get("mqtt", {}).get("topic_cmd", f"{socket.gethostname()}/w/command/{cam_id}")
-        user = config.get("mqtt", {}).get("username", "")
-        password = config.get("mqtt", {}).get("password", "")
-        
-        trigger_received = [False]
-        
-        def on_message(client, userdata, msg):
-            try:
-                payload = json.loads(msg.payload.decode())
-                if payload.get("action") == "capture":
-                    trigger_received[0] = True
-            except:
-                pass
-
-        import paho.mqtt.client as mqtt
-        client = mqtt.Client()
-        if user and password:
-            client.username_pw_set(user, password)
-        client.on_message = on_message
-        
-        client.connect(broker, port, 60)
-        client.subscribe(topic)
-        client.loop_start()
-        
-        # Wait up to 60 seconds for an external trigger
-        for _ in range(600):
-            time.sleep(0.1)
-            if trigger_received[0]:
-                break
-                
-        client.loop_stop()
-        client.disconnect()
-        
-        if not trigger_received[0]:
-            return jsonify({"error": "Timeout waiting for external MQTT trigger"}), 504
-            
-        # If trigger received, capture the frame!
-        if cam_data["mode"] == 'webui':
-            with cam_data["lock"]:
-                if cam_data["picam2"] is None:
-                    return jsonify({"error": "Camera not running"}), 500
-                frame = cam_data["picam2"].capture_array()
-                os.makedirs(os.path.dirname(save_path), exist_ok=True)
-                cv2.imwrite(save_path, frame)
-                return send_file(save_path, mimetype='image/jpeg')
-        else:
-            # If TCP mode, main.py should have captured it already since it also listens to MQTT.
-            start_mtime = os.path.getmtime(save_path) if os.path.exists(save_path) else 0
-            for _ in range(30):
-                time.sleep(0.1)
-                # Wait for file timestamp to update or file to be created
-                if os.path.exists(save_path) and os.path.getmtime(save_path) > start_mtime:
-                    return send_file(save_path, mimetype='image/jpeg')
-            
-            # Fallback if the file didn't update but we somehow got the trigger
-            if os.path.exists(save_path):
-                return send_file(save_path, mimetype='image/jpeg')
-            return jsonify({"error": "TCP Sender received trigger but file wasn't updated"}), 500
-
-    except Exception as e:
-        return jsonify({"error": f"MQTT listener failed: {e}"}), 500
-
-@app.route('/api/calibrate/save_alignment/<cam_id>', methods=['POST'])
-def save_alignment(cam_id):
-    """Save 4 marks and 4 corners and generate templates."""
-    if cam_id not in CAMERAS:
-        return jsonify({"error": "Invalid camera ID"}), 400
-        
-    try:
-        data = request.json
-        marks = data.get("marks", []) # [{"x": 10, "y": 20}, ...]
-        corners = data.get("corners", []) # [{"x": 10, "y": 20}, ...]
-        
-        # Backward compatibility or if user skipped corners
-        if len(corners) != 4:
-            corners = marks
-            
-        if len(marks) != 4:
-            return jsonify({"error": "Exactly 4 marker points are required"}), 400
-            
-        img_path = os.path.join(base_dir, "logs", f"{cam_id}_calibration_target.jpg")
-        if not os.path.exists(img_path):
-            return jsonify({"error": "Reference image not found. Please capture first."}), 404
-            
-        img = cv2.imread(img_path)
-        if img is None:
-            return jsonify({"error": "Failed to read reference image"}), 500
-            
-        # Ensure templates directory exists
-        templates_dir = os.path.join(base_dir, "configs", "templates")
-        os.makedirs(templates_dir, exist_ok=True)
-        
-        h_img, w_img = img.shape[:2]
-        
-        for i, m in enumerate(marks):
-            # m is now expected to be {x, y, width, height}
-            x = int(m.get("x", 0))
-            y = int(m.get("y", 0))
-            w = int(m.get("width", 60))
-            h = int(m.get("height", 60))
-            
-            # Boundary checks
-            x1 = max(0, x)
-            y1 = max(0, y)
-            x2 = min(w_img, x + w)
-            y2 = min(h_img, y + h)
-            
-            crop = img[y1:y2, x1:x2]
-            tmpl_name = f"{cam_id}_mark{i}.jpg"
-            if crop.size > 0:
-                cv2.imwrite(os.path.join(templates_dir, tmpl_name), crop)
-            
-            # The homography script expects the mark object to contain the center coordinate of the box
-            m["center_x"] = x + (w / 2.0)
-            m["center_y"] = y + (h / 2.0)
-            m["template"] = tmpl_name
-
-        calib_data = {
-            "calibration_marks": marks,
-            "calibration_corners": corners
-        }
-        
-        config_file = os.path.join(base_dir, "configs", f"{cam_id}_calibration_points.json")
-        with open(config_file, 'w') as f:
-            json.dump(calib_data, f, indent=4)
-            
-        return jsonify({"status": "success", "message": "Alignment templates saved"})
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/calibrate/save_crop/<cam_id>', methods=['POST'])
-def save_crop(cam_id):
-    """Save crop regions."""
-    if cam_id not in CAMERAS:
-        return jsonify({"error": "Invalid camera ID"}), 400
-        
-    try:
-        data = request.json
-        regions = data.get("regions", [])
-        ref_size = data.get("reference_image_size", {"width": 2304, "height": 1296})
-        
-        crop_data = {
-            "reference_image_size": ref_size,
-            "mask_regions": regions
-        }
-        
-        config_file = os.path.join(base_dir, "configs", f"{cam_id}_crop_regions.json")
-        with open(config_file, 'w') as f:
-            json.dump(crop_data, f, indent=4)
-            
-        return jsonify({"status": "success", "message": "Crop regions saved"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+# --- Routes removed ---
 
 # --- Routes ---
 @app.route('/api/system_stats', methods=['GET'])
@@ -673,6 +450,8 @@ if __name__ == '__main__':
         with cam["lock"]:
             if cam["mode"] == 'webui':
                 start_picamera(cid)
+            elif cam["mode"] == 'tcp':
+                start_tcp_sender(cid)
             
     # Run the Flask app on all interfaces, port 5000
     app.run(host='0.0.0.0', port=5000, threaded=True)

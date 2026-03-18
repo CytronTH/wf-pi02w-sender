@@ -21,8 +21,6 @@ sys.path.append(os.path.join(base_dir, 'src'))
 parser = argparse.ArgumentParser(description="Camera Sender Script")
 parser.add_argument('-c', '--config', type=str, default=os.path.join(base_dir, 'configs', 'config.json'), help='Path to config file')
 parser.add_argument('--mock_dir', type=str, default=None, help='Directory containing mock images for offline testing')
-parser.add_argument('--debug_align', action='store_true', help='Save visualization of the alignment process to disk')
-parser.add_argument('--disable_clahe', action='store_true', help='Disable CLAHE enhancement and use raw grayscale')
 args = parser.parse_args()
 
 try:
@@ -49,14 +47,6 @@ except FileNotFoundError:
             "continuous_stream": False,
             "stream_interval": 1.0,
             "loop_delay": 0.05
-        },
-        "preprocessing": {
-            "enable_alignment": False,
-            "enable_shadow_removal": False,
-            "enable_pre_crop": False,
-            "enable_grayscale": False,
-            "enable_clahe": False,
-            "enable_box_cropping": False
         }
     }
     # Auto-save the fallback config so it exists for next time
