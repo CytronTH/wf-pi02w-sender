@@ -576,6 +576,62 @@
             .input-group { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
             .form-input { width: 100%; }
         }
+
+        /* --- System Resources Gauges --- */
+        .sys-stats-card {
+            margin-bottom: 2rem;
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+            padding: 1.5rem;
+        }
+
+        .sys-stats-card h2 {
+            grid-column: 1 / -1;
+            font-size: 1.2rem;
+            color: var(--text-main);
+            margin-bottom: 0.5rem;
+            text-align: center;
+        }
+
+        .gauge-item {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .gauge-label {
+            display: flex;
+            justify-content: space-between;
+            font-weight: 500;
+            font-size: 0.95rem;
+            color: var(--text-muted);
+        }
+
+        .gauge-val {
+            color: var(--text-main);
+            font-weight: 700;
+        }
+
+        .gauge-bar-bg {
+            width: 100%;
+            height: 12px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .gauge-bar-fill {
+            height: 100%;
+            background: var(--success-color);
+            border-radius: 6px;
+            transition: width 0.5s ease, background-color 0.5s ease;
+        }
+
+        @media (max-width: 600px) {
+            .sys-stats-card { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
@@ -594,6 +650,51 @@
     <!-- Camera Grid -->
     <div class="container dual-grid">
         
+        <!-- System Resources Monitor -->
+        <div class="card sys-stats-card">
+            <h2>สถานะทรัพยากรระบบ (System Status)</h2>
+            
+            <div class="gauge-item">
+                <div class="gauge-label">
+                    <span>ซีพียู (CPU)</span>
+                    <span class="gauge-val" id="cpu-val">--%</span>
+                </div>
+                <div class="gauge-bar-bg">
+                    <div class="gauge-bar-fill" id="cpu-bar" style="width: 0%;"></div>
+                </div>
+            </div>
+
+            <div class="gauge-item">
+                <div class="gauge-label">
+                    <span>แรม (RAM)</span>
+                    <span class="gauge-val" id="ram-val">--%</span>
+                </div>
+                <div class="gauge-bar-bg">
+                    <div class="gauge-bar-fill" id="ram-bar" style="width: 0%;"></div>
+                </div>
+            </div>
+
+            <div class="gauge-item">
+                <div class="gauge-label">
+                    <span>อุณหภูมิซีพียู (CPU Temp)</span>
+                    <span class="gauge-val" id="temp-val">-- °C</span>
+                </div>
+                <div class="gauge-bar-bg">
+                    <div class="gauge-bar-fill" id="temp-bar" style="width: 0%;"></div>
+                </div>
+            </div>
+
+            <div class="gauge-item">
+                <div class="gauge-label">
+                    <span>พื้นที่เก็บข้อมูล (Disk)</span>
+                    <span class="gauge-val" id="disk-val">--%</span>
+                </div>
+                <div class="gauge-bar-bg">
+                    <div class="gauge-bar-fill" id="disk-bar" style="width: 0%;"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- Camera 0 Panel -->
         <div class="card">
             <h2 id="cameraTitle_cam0" style="text-align: center; margin-bottom: 1rem;">Camera 0</h2>
@@ -1167,11 +1268,49 @@
         }
 
         // --- Calibration Logic removed ---
+        
+        async function fetchSystemStats() {
+            try {
+                const response = await fetch('/api/system_stats');
+                const p = await response.json();
+                if (p.status === 'success') {
+                    // Update CPU
+                    document.getElementById('cpu-val').innerText = `${p.cpu.toFixed(1)}%`;
+                    const cpuBar = document.getElementById('cpu-bar');
+                    cpuBar.style.width = `${Math.min(100, Math.max(0, p.cpu))}%`;
+                    cpuBar.style.backgroundColor = p.cpu >= 85 ? 'var(--danger-color)' : (p.cpu >= 70 ? 'var(--warning-color)' : 'var(--success-color)');
+
+                    // Update RAM
+                    document.getElementById('ram-val').innerText = `${p.ram.toFixed(1)}%`;
+                    const ramBar = document.getElementById('ram-bar');
+                    ramBar.style.width = `${Math.min(100, Math.max(0, p.ram))}%`;
+                    ramBar.style.backgroundColor = p.ram >= 85 ? 'var(--danger-color)' : (p.ram >= 70 ? 'var(--warning-color)' : '#3b82f6'); // Blue
+
+                    // Update Temp
+                    document.getElementById('temp-val').innerText = `${p.temp.toFixed(1)} °C`;
+                    const tempBar = document.getElementById('temp-bar');
+                    const tempPercent = (p.temp / 85) * 100; // Map 0-85c to 0-100% width
+                    tempBar.style.width = `${Math.min(100, Math.max(0, tempPercent))}%`;
+                    tempBar.style.backgroundColor = p.temp >= 75 ? 'var(--danger-color)' : (p.temp >= 65 ? 'var(--warning-color)' : 'var(--success-color)');
+
+                    // Update Disk
+                    document.getElementById('disk-val').innerHTML = `${p.disk_percent.toFixed(1)}% <span style="font-size: 0.8em; color: var(--text-muted); font-weight: 400;">(${p.disk_free_gb} GB free)</span>`;
+                    const diskBar = document.getElementById('disk-bar');
+                    diskBar.style.width = `${Math.min(100, Math.max(0, p.disk_percent))}%`;
+                    if (p.disk_percent >= 90) diskBar.style.background = 'var(--danger-color)';
+                    else diskBar.style.background = 'var(--primary-gradient)';
+                }
+            } catch (error) {
+                console.error("Error fetching system stats:", error);
+            }
+        }
 
         // Initialize UI on load
         window.addEventListener('load', () => {
              checkStatus();
+             fetchSystemStats();
              setInterval(checkStatus, 5000);
+             setInterval(fetchSystemStats, 5000);
              setInterval(fetchLogs, 1500); // Fetch logs every 1.5 seconds
              
              // Load initial camera controls from backend configs
