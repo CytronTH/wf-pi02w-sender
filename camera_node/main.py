@@ -300,7 +300,7 @@ def on_mqtt_message(client, userdata, msg):
         if config_updated:
             threading.Thread(target=save_config, daemon=True).start()
             updated_params = {'camera_params': config.get("controls", {})}
-            client.publish(MQTT_TOPIC_STATUS, json.dumps(updated_params))
+            client.publish(MQTT_TOPIC_STATUS, json.dumps(updated_params), retain=True)
 
         if 'resolution' in payload:
             res = payload['resolution']
@@ -376,7 +376,7 @@ def main():
                     'resolution': [current_width, current_height],
                     'camera_params': config.get("controls", {})
                 }
-                mqtt_client.publish(MQTT_TOPIC_STATUS, json.dumps(status))
+                mqtt_client.publish(MQTT_TOPIC_STATUS, json.dumps(status), retain=True)
                 last_status_time = current_time
 
             should_stream = CONTINUOUS_STREAM and (current_time - last_capture_time >= STREAM_INTERVAL)

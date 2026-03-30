@@ -1006,6 +1006,17 @@
             html += createInputGroup('Enable Continuous Stream', currentConfig.camera?.continuous_stream || false, 'boolean', 'camera', 'continuous_stream');
             html += '</div>';
 
+            // SFTP Section
+            html += '<div class="settings-section"><h3>SFTP Upload Settings</h3>';
+            html += createInputGroup('Enable SFTP Upload', currentConfig.sftp?.sftp_enabled || false, 'boolean', 'sftp', 'sftp_enabled');
+            html += createInputGroup('SFTP Host', currentConfig.sftp?.host || '', 'text', 'sftp', 'host');
+            html += createInputGroup('SFTP Port', currentConfig.sftp?.port || 22, 'number', 'sftp', 'port');
+            html += createInputGroup('Username', currentConfig.sftp?.username || '', 'text', 'sftp', 'username');
+            html += createInputGroup('Password', currentConfig.sftp?.password || '', 'password', 'sftp', 'password');
+            html += createInputGroup('Remote Path', currentConfig.sftp?.remote_path || '/upload/images', 'text', 'sftp', 'remote_path');
+            html += createInputGroup('Batch Size', currentConfig.sftp?.batch_size || 3, 'number', 'sftp', 'batch_size');
+            html += '</div>';
+
             document.getElementById('settingsBody').innerHTML = html;
         }
 
@@ -1243,7 +1254,7 @@
                     if (config.controls.AfMode !== undefined) {
                          const fMode = document.getElementById(`focusMode_${cam_id}`);
                          fMode.value = config.controls.AfMode;
-                         updateFocusMode(cam_id, config.controls.AfMode); // Trigger UI change
+                         if(config.controls.LensPosition !== undefined) { document.getElementById("focusSlider_" + cam_id).value = config.controls.LensPosition; } updateFocusMode(cam_id, config.controls.AfMode); // Trigger UI change
                          
                          // Re-apply locked state if previously saved
                          if (config.controls.AfPause === 2 && config.controls.AfMode !== 0) {
