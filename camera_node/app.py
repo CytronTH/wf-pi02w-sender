@@ -11,13 +11,14 @@ from picamera2 import Picamera2
 import psutil
 import datetime
 
+from waitress import serve
+from functools import wraps
+
 app = Flask(__name__)
 
 # --- Global State ---
-# Base directory for config paths
 base_dir = os.path.dirname(os.path.abspath(__file__))
 
-# Manage state for camera
 CAMERAS = {
     "cam0": {
         "device_id": 0,
@@ -30,9 +31,27 @@ CAMERAS = {
     }
 }
 
+# --- Basic Auth ---
+def check_auth(username, password):
+    return username == 'admin' and password == 'wf2026'
+
+def authenticate():
+    return Response(
+    'Could not verify your access level for that URL.\n'
+    'You have to login with proper credentials', 401,
+    {'WWW-Authenticate': 'Basic realm="Login Required"'})
+
+def requires_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_auth(auth.username, auth.password):
+            return authenticate()
+        return f(*args, **kwargs)
+    return decorated
+
 # --- Helper Functions ---
 def get_camera_settings(cam_id):
-    """Load default dimensions and camera controls from the config file."""
     width, height = 2304, 1296
     controls = {}
     try:
@@ -49,7 +68,6 @@ def get_camera_settings(cam_id):
     return width, height, controls
 
 def start_picamera(cam_id):
-    """Initialize and start picamera2 for WebUI streaming for a specific camera."""
     cam_data = CAMERAS[cam_id]
     print(f"INFO: Starting Picamera2 for WebUI ({cam_id})...")
     try:
@@ -57,10 +75,6 @@ def start_picamera(cam_id):
             cam_data["picam2"] = Picamera2(camera_num=cam_data["device_id"])
             
         width, height, controls = get_camera_settings(cam_id)
-        # For Pi Zero 2W, we force a lower resolution (e.g., 640x360) 
-        # for the WebUI preview to prevent out-of-memory or CPU hanging
-        # when capturing and encoding RGB arrays. 
-        # The main TCP Sender will still use the full configured resolution.
         preview_width, preview_height = 640, 360
         cam_config = cam_data["picam2"].create_preview_configuration(
             main={'format': 'RGB888', 'size': (preview_width, preview_height)},
@@ -69,18 +83,14 @@ def start_picamera(cam_id):
         cam_data["picam2"].configure(cam_config)
         cam_data["picam2"].start()
         
-        # Apply Custom Camera Controls if available
         if controls:
             try:
                 cam_data["picam2"].set_controls(controls)
-                print(f"INFO: Applied camera controls: {controls}")
             except Exception as ce:
                 print(f"ERROR: Failed to apply camera controls on {cam_id}: {ce}")
         
-        # Extract Sensor Name
         raw_id = cam_data["picam2"].camera.id
         if '/' in raw_id and '@' in raw_id:
-            # Typically: /base/axi/pcie@1000120000/rp1/i2c@88000/imx708@1a -> imx708
             cam_data["sensor_name"] = raw_id.split('/')[-1].split('@')[0].upper()
         else:
             cam_data["sensor_name"] = raw_id
@@ -93,7 +103,6 @@ def start_picamera(cam_id):
         return False
 
 def stop_picamera(cam_id):
-    """Stop and release picamera2 for a specific camera."""
     cam_data = CAMERAS[cam_id]
     print(f"INFO: Stopping Picamera2 ({cam_id})...")
     if cam_data["picam2"] is not None:
@@ -107,14 +116,38 @@ def stop_picamera(cam_id):
             print(f"INFO: Picamera2 ({cam_id}) stopped and camera resource released.")
 
 def stream_reader(process, logs_queue):
-    """Reads stdout from a subprocess and puts it into a deque."""
     for line in iter(process.stdout.readline, ''):
         if line:
             logs_queue.append(line.rstrip())
     process.stdout.close()
 
+def start_hd_mode(cam_id):
+    cam_data = CAMERAS[cam_id]
+    cfg_path = cam_data["config_path"]
+    
+    if cam_data["tcp_process"] is None or cam_data["tcp_process"].poll() is not None:
+        print(f"INFO: Starting HD Preview Subprocess ({cam_id}): python3 main.py -c {cfg_path} --preview_only")
+        cam_data["logs"].clear()
+        try:
+            cam_data["tcp_process"] = subprocess.Popen(
+                ['python3', '-u', 'main.py', '-c', cfg_path, '--preview_only'],
+                cwd=base_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+            t = threading.Thread(target=stream_reader, args=(cam_data["tcp_process"], cam_data["logs"]), daemon=True)
+            t.start()
+            
+            print(f"INFO: HD Preview Sender ({cam_id}) started with PID {cam_data['tcp_process'].pid}")
+            return True
+        except Exception as e:
+            print(f"ERROR: Failed to start HD Preview Sender for {cam_id}: {e}")
+            return False
+    return True
+
 def start_tcp_sender(cam_id):
-    """Start the main.py script as a subprocess for a specific camera."""
     cam_data = CAMERAS[cam_id]
     cfg_path = cam_data["config_path"]
     
@@ -123,14 +156,13 @@ def start_tcp_sender(cam_id):
         cam_data["logs"].clear()
         try:
             cam_data["tcp_process"] = subprocess.Popen(
-                ['python3', '-u', 'main.py', '-c', cfg_path], # Make python stdout unbuffered
+                ['python3', '-u', 'main.py', '-c', cfg_path],
                 cwd=base_dir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1
             )
-            # Start reader daemon thread
             t = threading.Thread(target=stream_reader, args=(cam_data["tcp_process"], cam_data["logs"]), daemon=True)
             t.start()
             
@@ -142,7 +174,6 @@ def start_tcp_sender(cam_id):
     return True
 
 def stop_tcp_sender(cam_id):
-    """Terminate the main.py subprocess if it's running for a specific camera."""
     cam_data = CAMERAS[cam_id]
     print(f"INFO: Stopping TCP Sender Subprocess ({cam_id})...")
     if cam_data["tcp_process"] is not None and cam_data["tcp_process"].poll() is None:
@@ -164,20 +195,16 @@ def stop_tcp_sender(cam_id):
 
 # --- Camera Generator ---
 def generate_frames(cam_id):
-    """Generator function that yields JPEG frames from Picamera2."""
     cam_data = CAMERAS[cam_id]
     while True:
         with cam_data["lock"]:
             if cam_data["mode"] != 'webui' or cam_data["picam2"] is None:
-                # If not in WebUI mode, yield nothing or sleep
                 time.sleep(1)
                 continue
 
             try:
-                # Capture frame from the camera
                 frame = cam_data["picam2"].capture_array()
                 
-                # Add resolution label to the bottom right corner
                 h, w = frame.shape[:2]
                 text = f"{w}x{h}"
                 font = cv2.FONT_HERSHEY_SIMPLEX
@@ -187,11 +214,9 @@ def generate_frames(cam_id):
                 text_w, text_h = text_size
                 org = (w - text_w - 10, h - 10)
                 
-                # Draw black background rectangle for better visibility
                 cv2.rectangle(frame, (org[0] - 5, org[1] - text_h - 5), (w, h), (0, 0, 0), -1)
                 cv2.putText(frame, text, org, font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
 
-                # Encode to JPEG
                 ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                 if not ret:
                     time.sleep(0.1)
@@ -209,15 +234,15 @@ def generate_frames(cam_id):
 
 # --- API Routes for Config ---
 @app.route('/api/logs/<cam_id>', methods=['GET'])
+@requires_auth
 def get_logs(cam_id):
-    """Return the recent subprocess logs for a specific camera."""
     if cam_id not in CAMERAS:
         return jsonify({"error": "Invalid camera ID"}), 400
     return jsonify(list(CAMERAS[cam_id]["logs"]))
 
 @app.route('/api/config/<cam_id>', methods=['GET'])
+@requires_auth
 def get_config(cam_id):
-    """Returns the current config from disk."""
     if cam_id not in CAMERAS:
         return jsonify({"error": "Invalid camera ID"}), 400
         
@@ -232,8 +257,8 @@ def get_config(cam_id):
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/config/<cam_id>', methods=['POST'])
+@requires_auth
 def save_config(cam_id):
-    """Receives, validates, and saves new config to disk."""
     if cam_id not in CAMERAS:
         return jsonify({"error": "Invalid camera ID"}), 400
         
@@ -242,14 +267,20 @@ def save_config(cam_id):
         if not new_config:
             return jsonify({"error": "No JSON payload provided"}), 400
             
-        required_sections = ["tcp", "mqtt", "camera"]
+        required_sections = ["tcp", "mqtt", "camera", "sftp"]
         for section in required_sections:
             if section not in new_config:
                 new_config[section] = {}
 
         cfg_path = CAMERAS[cam_id]["config_path"]
-        with open(cfg_path, 'w') as f:
+        tmp_path = cfg_path + ".tmp"
+        
+        # Atomic save
+        with open(tmp_path, 'w') as f:
             json.dump(new_config, f, indent=4)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, cfg_path)
             
         print(f"INFO: Config file for {cam_id} updated via WebUI.")
 
@@ -268,8 +299,8 @@ def save_config(cam_id):
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/config/<cam_id>/camera_controls', methods=['POST'])
+@requires_auth
 def update_camera_controls(cam_id):
-    """Receives camera control properties, saves them, and applies immediately if streaming."""
     if cam_id not in CAMERAS:
         return jsonify({"error": "Invalid camera ID"}), 400
         
@@ -279,26 +310,26 @@ def update_camera_controls(cam_id):
             return jsonify({"error": "No JSON payload provided"}), 400
             
         cfg_path = CAMERAS[cam_id]["config_path"]
-        
-        # Load existing config
         config = {}
         if os.path.exists(cfg_path):
             with open(cfg_path, 'r') as f:
                 config = json.load(f)
                 
-        # Update or create the controls namespace
         if "controls" not in config:
             config["controls"] = {}
             
         config["controls"].update(controls_update)
         
-        # Save seamlessly without destroying stream mode
-        with open(cfg_path, 'w') as f:
+        # Atomic Save seamlessly without destroying stream mode
+        tmp_path = cfg_path + ".tmp"
+        with open(tmp_path, 'w') as f:
             json.dump(config, f, indent=4)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, cfg_path)
             
         print(f"INFO: Camera controls for {cam_id} updated: {controls_update}")
         
-        # Apply the new controls instantly if picam2 is actively streaming in WebUI
         cam_data = CAMERAS[cam_id]
         with cam_data["lock"]:
             if cam_data["mode"] == "webui" and cam_data["picam2"] is not None:
@@ -307,6 +338,32 @@ def update_camera_controls(cam_id):
                     print(f"INFO: Applied dynamic controls to active stream.")
                 except Exception as ce:
                     print(f"ERROR: Failed to apply dynamic controls on {cam_id}: {ce}")
+            elif cam_data["mode"] in ["tcp", "hd_preview"]:
+                import paho.mqtt.publish as publish
+                import socket
+                
+                broker = config.get("mqtt", {}).get("broker", "localhost")
+                port = int(config.get("mqtt", {}).get("port", 1883))
+                topic = config.get("mqtt", {}).get("topic_cmd", f"{socket.gethostname()}/command")
+                
+                if "{hostname}" in topic:
+                    topic = topic.replace("{hostname}", socket.gethostname())
+                elif topic.startswith("wf52/"):
+                    topic = f"{socket.gethostname()}/" + topic.split("/", 1)[1]
+                    
+                auth = None
+                if config.get("mqtt", {}).get("username"):
+                    auth = {
+                        "username": config.get("mqtt", {})["username"],
+                        "password": config.get("mqtt", {}).get("password", "")
+                    }
+                
+                try:
+                    publish.single(topic, payload=json.dumps(controls_update), hostname=broker, port=port, auth=auth)
+                    print(f"INFO: Published dynamic controls to MQTT topic {topic} for {cam_id}")
+                except Exception as ce:
+                    print(f"ERROR: Failed to publish dynamic controls via MQTT: {ce}")
+                    
                     
         return jsonify({"status": "success", "message": "Camera controls updated and saved."})
         
@@ -314,10 +371,9 @@ def update_camera_controls(cam_id):
         print(f"ERROR updating camera controls for {cam_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
-# --- Routes removed ---
-
 # --- Routes ---
 @app.route('/api/system_stats', methods=['GET'])
+@requires_auth
 def system_stats():
     try:
         cpu = psutil.cpu_percent(interval=0.1)
@@ -347,16 +403,15 @@ def favicon():
     return '', 204
 
 @app.route('/')
+@requires_auth
 def index():
-    """Render the main WebUI."""
     hostname = socket.gethostname()
-    # We pass the dictionary of modes to the template although JS will fetch it anyway
     modes = {k: v["mode"] for k, v in CAMERAS.items()}
     return render_template('index.html', modes=modes, hostname=hostname)
 
 @app.route('/video_feed/<cam_id>')
+@requires_auth
 def video_feed(cam_id):
-    """Video streaming route."""
     if cam_id not in CAMERAS:
         return "Camera ID not found", 404
         
@@ -366,7 +421,6 @@ def video_feed(cam_id):
         return Response("Camera is currently allocated to TCP Sender.", status=409)
 
 def get_camera_display_name(cam_id):
-    """Load the custom display name from the config file, fallback to default."""
     display_name = f"Camera {CAMERAS[cam_id]['device_id']}"
     try:
         cfg_path = CAMERAS[cam_id]["config_path"]
@@ -381,8 +435,8 @@ def get_camera_display_name(cam_id):
     return display_name
 
 @app.route('/debug/<cam_id>')
+@requires_auth
 def debug_view(cam_id):
-    """Serve the debug log viewer page."""
     if cam_id not in CAMERAS:
         return "Camera ID not found", 404
     hostname = socket.gethostname()
@@ -391,8 +445,8 @@ def debug_view(cam_id):
     return render_template('debug.html', cam_id=cam_id, hostname=hostname, display_name=display_name, start_time=server_start_time)
 
 @app.route('/status')
+@requires_auth
 def status():
-    """Return the current system status for all cameras."""
     res = {}
     for cid, cam in CAMERAS.items():
         res[cid] = {
@@ -404,13 +458,13 @@ def status():
     return jsonify(res)
 
 @app.route('/switch_mode', methods=['POST'])
+@requires_auth
 def switch_mode():
-    """API endpoint to switch modes per camera."""
     data = request.json
     target_mode = data.get('mode')
     cam_id = data.get('cam_id')
     
-    if target_mode not in ['webui', 'tcp'] or cam_id not in CAMERAS:
+    if target_mode not in ['webui', 'tcp', 'hd_preview'] or cam_id not in CAMERAS:
         return jsonify({"error": "Invalid mode or camera ID"}), 400
         
     cam_data = CAMERAS[cam_id]
@@ -431,6 +485,14 @@ def switch_mode():
             else:
                 start_picamera(cam_id)
                 
+        elif target_mode == 'hd_preview':
+            stop_picamera(cam_id)
+            success = start_hd_mode(cam_id)
+            if success:
+                cam_data["mode"] = 'hd_preview'
+            else:
+                start_picamera(cam_id)
+                
         elif target_mode == 'webui':
             stop_tcp_sender(cam_id)
             time.sleep(2)
@@ -444,8 +506,64 @@ def switch_mode():
                 
     return jsonify({"status": "success", "mode": cam_data["mode"]})
 
+@app.route('/api/latest_image/<cam_id>')
+def latest_image(cam_id):
+    if cam_id not in CAMERAS:
+        return jsonify({"error": "Invalid camera ID"}), 400
+    
+    file_path = f"/tmp/latest_preview_{cam_id}.jpg"
+    if os.path.exists(file_path):
+        from flask import send_file
+        return send_file(file_path, mimetype='image/jpeg')
+    else:
+        return jsonify({"error": "Image not yet captured"}), 404
+
+import paho.mqtt.client as mqtt
+from queue import Queue
+
+@app.route('/api/trigger_stream')
+@requires_auth
+def trigger_stream():
+    def generate():
+        q = Queue()
+        def on_message(client, userdata, msg):
+            q.put(msg.payload.decode('utf-8', errors='replace'))
+            
+        client = mqtt.Client()
+        client.on_message = on_message
+        
+        mqtt_cfg = {}
+        try:
+            with open(CAMERAS["cam0"]["config_path"], 'r') as f:
+                mqtt_cfg = json.load(f).get("mqtt", {})
+        except:
+            pass
+            
+        broker = mqtt_cfg.get("broker", "localhost")
+        port = mqtt_cfg.get("port", 1883)
+        username = mqtt_cfg.get("username")
+        password = mqtt_cfg.get("password")
+        
+        if username and password:
+            client.username_pw_set(username, password)
+            
+        try:
+            client.connect(broker, int(port), 60)
+            client.subscribe("wf/alert/gpio27")
+            client.loop_start()
+            
+            while True:
+                msg = q.get()
+                yield f"data: {msg}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        finally:
+            client.loop_stop()
+            client.disconnect()
+            
+    return Response(generate(), mimetype="text/event-stream")
+
 if __name__ == '__main__':
-    # Initialize initial state for all cameras
     for cid, cam in CAMERAS.items():
         with cam["lock"]:
             if cam["mode"] == 'webui':
@@ -453,5 +571,5 @@ if __name__ == '__main__':
             elif cam["mode"] == 'tcp':
                 start_tcp_sender(cid)
             
-    # Run the Flask app on all interfaces, port 5000
-    app.run(host='0.0.0.0', port=5000, threaded=True)
+    # Run the Waitress app on all interfaces, extended limits to fix WebUI freeze
+    serve(app, host='0.0.0.0', port=5000, threads=16, connection_limit=200, channel_timeout=60, cleanup_interval=30)

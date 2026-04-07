@@ -24,12 +24,12 @@ import sftp_handler
 # Ensure local capture directory
 CAPTURE_DIR = os.path.join(base_dir, 'logs', 'captures')
 os.makedirs(CAPTURE_DIR, exist_ok=True)
-pending_transfers = []
 
 # --- Configuration Loader ---
 parser = argparse.ArgumentParser(description="Camera Sender Script")
 parser.add_argument('-c', '--config', type=str, default=os.path.join(base_dir, 'configs', 'config.json'), help='Path to config file')
 parser.add_argument('--mock_dir', type=str, default=None, help='Directory containing mock images for offline testing')
+parser.add_argument('--preview_only', action='store_true', help='Disable TCP/SFTP and save high-res images to /tmp/ for HD WebUI preview')
 args = parser.parse_args()
 
 try:
@@ -145,9 +145,13 @@ def get_cpu_temperature():
 
 def save_config():
     try:
-        with open(args.config, 'w') as f:
+        tmp_path = args.config + ".tmp"
+        with open(tmp_path, 'w') as f:
             json.dump(config, f, indent=4)
-        print(f"INFO: Saved updated configuration to {args.config}")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, args.config)
+        print(f"INFO: Saved updated configuration (atomic) to {args.config}")
     except Exception as e:
         print(f"ERROR: Failed to save config to {args.config}: {e}")
 
@@ -244,6 +248,35 @@ def send_image(frame, image_id="raw_image"):
         if tcp_socket: tcp_socket.close()
         tcp_socket = None
 
+def sftp_worker_thread():
+    print("INFO: SFTP fallback queue worker started.")
+    import sftp_handler
+    while True:
+        try:
+            with open(args.config, 'r') as f:
+                sftp_cfg = json.load(f).get("sftp", {})
+            
+            if sftp_cfg.get("sftp_enabled", False):
+                batch_size = sftp_cfg.get("batch_size", 3)
+                all_images = sorted(glob.glob(os.path.join(CAPTURE_DIR, "*.jpg")))
+                
+                if len(all_images) >= batch_size:
+                    files_to_upload = all_images[:batch_size]
+                    uploader = sftp_handler.SFTPHandler(sftp_cfg)
+                    uploader.upload_files(files_to_upload)
+                    time.sleep(2)
+                elif len(all_images) > 0:
+                    oldest_file = min([os.path.getmtime(f) for f in all_images])
+                    if time.time() - oldest_file > 15:
+                        files_to_upload = all_images
+                        uploader = sftp_handler.SFTPHandler(sftp_cfg)
+                        uploader.upload_files(files_to_upload)
+                        time.sleep(2)
+            time.sleep(2)
+        except Exception as e:
+            print(f"SFTP Worker error: {e}")
+            time.sleep(5)
+
 def image_sender_worker():
     print("INFO: Image sender worker thread started.")
     while True:
@@ -268,7 +301,7 @@ def on_mqtt_message(client, userdata, msg):
 
         controls = {}
         config_updated = False
-        if "camera_params" not in config: config["controls"] = {}
+        if "controls" not in config: config["controls"] = {}
             
         if 'ExposureTime' in payload:
             controls['ExposureTime'] = int(payload['ExposureTime'])
@@ -288,7 +321,7 @@ def on_mqtt_message(client, userdata, msg):
             controls['LensPosition'] = float(payload['LensPosition'])
             config["controls"]['LensPosition'] = controls['LensPosition']
             controls['AfMode'] = 0
-            config['controls']['AfMode'] = 0
+            config["controls"]['AfMode'] = 0
             config_updated = True
         if 'AfMode' in payload:
             controls['AfMode'] = int(payload['AfMode'])
@@ -328,7 +361,7 @@ def on_mqtt_message(client, userdata, msg):
         print(f"ERROR: Error handling MQTT message: {e}")
 
 def main():
-    global picam2, capture_triggered, pending_transfers
+    global picam2, capture_triggered
 
     try:
         if args.mock_dir:
@@ -346,8 +379,14 @@ def main():
         print(f"CRITICAL: Failed to initialize camera: {e}")
         os._exit(1)
 
-    worker = threading.Thread(target=image_sender_worker, daemon=True)
-    worker.start()
+    if not args.preview_only:
+        worker = threading.Thread(target=image_sender_worker, daemon=True)
+        worker.start()
+        
+        sftp_worker = threading.Thread(target=sftp_worker_thread, daemon=True)
+        sftp_worker.start()
+    else:
+        print("INFO: Started in Preview Only mode. Network queues disabled.")
 
     mqtt_client = mqtt.Client()
     if MQTT_USERNAME and MQTT_PASSWORD:
@@ -392,9 +431,17 @@ def main():
                     try:
                         frame = picam2.capture_array()
                         
+                        # HD Preview Logic Start
+                        preview_path = f"/tmp/latest_preview_cam{CAMERA_ID}.jpg"
+                        try:
+                            cv2.imwrite(preview_path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                        except Exception as e:
+                            print(f"ERROR: Preview write failed: {e}")
+                        # HD Preview Logic End
+                        
                         # SFTP Handle Start
                         sftp_cfg = config.get("sftp", {})
-                        if manual_capture and sftp_cfg.get("sftp_enabled", False):
+                        if manual_capture and sftp_cfg.get("sftp_enabled", False) and not args.preview_only:
                             fraction = f"{time.time() - int(time.time()):.3f}"[2:]
                             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                             filename = f"cam{CAMERA_ID}_{timestamp}_{fraction}.jpg"
@@ -402,15 +449,6 @@ def main():
                             
                             # Save frame locally first per requirement
                             cv2.imwrite(local_path, frame)
-                            pending_transfers.append(local_path)
-                            
-                            batch_size = sftp_cfg.get("batch_size", 3)
-                            if len(pending_transfers) >= batch_size:
-                                files_to_upload = list(pending_transfers)
-                                pending_transfers.clear()
-                                uploader = sftp_handler.SFTPHandler(sftp_cfg)
-                                t = threading.Thread(target=uploader.upload_files, args=(files_to_upload,), daemon=True)
-                                t.start()
                         # SFTP Handle End
                         
                         if image_queue.full():
@@ -418,7 +456,9 @@ def main():
                                 image_queue.get_nowait()
                                 image_queue.task_done()
                             except: pass
-                        image_queue.put(frame)
+                            
+                        if not args.preview_only:
+                            image_queue.put(frame)
                         last_capture_time = time.time()
                     except Exception as e:
                         print(f"ERROR: Capture failed: {e}")

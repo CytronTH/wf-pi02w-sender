@@ -632,6 +632,19 @@
         @media (max-width: 600px) {
             .sys-stats-card { grid-template-columns: 1fr; }
         }
+    
+        .blinking-trigger {
+            background: rgba(99, 102, 241, 0.2) !important;
+            border-color: #a855f7 !important;
+            color: #f8fafc;
+            animation: trigger-pulse 0.5s infinite;
+        }
+        @keyframes trigger-pulse {
+            0% { box-shadow: 0 0 15px #a855f7; transform: scale(1.05); }
+            50% { box-shadow: none; transform: scale(1); }
+            100% { box-shadow: 0 0 15px #a855f7; transform: scale(1.05); }
+        }
+
     </style>
 </head>
 <body>
@@ -649,6 +662,8 @@
 
     <!-- Camera Grid -->
     <div class="container dual-grid">
+
+
         
         <!-- System Resources Monitor -->
         <div class="card sys-stats-card">
@@ -707,6 +722,10 @@
             </div>
 
             <div class="video-wrapper" id="videoWrapper_cam0">
+                <div id="trigger-indicator" style="position: absolute; top: 15px; right: 15px; z-index: 10; font-size: 0.85rem; font-weight: bold; background: rgba(0,0,0,0.5); padding: 5px 12px; border-radius: 20px; transition: all 0.3s ease; display: flex; gap: 5px; align-items: center; border: 1px solid rgba(255,255,255,0.1);">
+                    <span id="trigger-text" style="color: var(--text-main);">WAITING</span>
+                </div>
+                
                 <div class="placeholder-text" id="placeholderText_cam0">
                     <span class="placeholder-icon">📷</span>
                     <span>Camera is allocated to TCP Sender<br>Live Stream is paused on WebUI.</span>
@@ -744,12 +763,20 @@
                             <input type="range" id="focusSlider_cam0" style="flex: 2; display: none;" min="0.0" max="10.0" step="0.1" value="0.0" oninput="updateCamControl('cam0', 'LensPosition', this.value)">
                             <span id="focusVal_cam0" style="display: none; width: 30px; text-align: right;">0.0</span>
                         </div>
+                    </div>
+                    <!-- New Trigger Timeout Control -->
+                    <div class="slider-group">
+                        <label>Trigger Display Time (ms) <span id="triggerTimeoutVal_cam0">1000</span></label>
+                        <input type="range" id="triggerTimeout_cam0" min="500" max="10000" step="500" value="1000" oninput="updateTriggerTimeout(this.value)">
+                    </div>
+                    
                     <div id="saveStatus_cam0" style="color: var(--success-color); font-size: 0.8rem; text-align: right; margin-top: 0.5rem; min-height: 1.2rem;"></div>
                 </div>
             </details>
 
             <div class="controls">
                 <button class="btn btn-webui active" id="btnWebui_cam0" onclick="switchMode('cam0', 'webui')">WebUI Stream</button>
+                <button class="btn btn-hdfocus" id="btnHdfocus_cam0" onclick="switchMode('cam0', 'hd_preview')" style="background: rgba(234, 179, 8, 0.2); border: 1px solid rgba(234, 179, 8, 0.5); color: #fff;">HD Focus</button>
                 <button class="btn btn-tcp" id="btnTcp_cam0" onclick="switchMode('cam0', 'tcp')">TCP Sender</button>
                 <button class="btn btn-settings" onclick="openSettings('cam0')" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);">
                     ⚙️ Config
@@ -808,11 +835,13 @@
             const statusText = document.getElementById(`statusText_${cam_id}`);
             const pidText = document.getElementById(`pidText_${cam_id}`);
             const btnWebui = document.getElementById(`btnWebui_${cam_id}`);
+            const btnHdfocus = document.getElementById(`btnHdfocus_${cam_id}`);
             const btnTcp = document.getElementById(`btnTcp_${cam_id}`);
             const logBox = document.getElementById(`logBox_${cam_id}`);
             
             if (mode === 'webui') {
                 btnWebui.classList.add('active');
+                if (btnHdfocus) btnHdfocus.style.background = 'rgba(234, 179, 8, 0.2)';
                 btnTcp.classList.remove('active');
                 statusBanner.className = 'status-banner';
                 statusText.innerText = "WebUI Live Stream (Active)";
@@ -825,8 +854,24 @@
                 if (!videoFeed.src || !videoFeed.src.includes(`/video_feed/${cam_id}`)) {
                      videoFeed.src = `/video_feed/${cam_id}?t=` + new Date().getTime();
                 }
+            } else if (mode === 'hd_preview') {
+                btnWebui.classList.remove('active');
+                if (btnHdfocus) btnHdfocus.style.background = '#eab308';
+                btnTcp.classList.remove('active');
+                statusBanner.className = 'status-banner';
+                statusBanner.style.borderLeftColor = '#eab308';
+                statusText.innerText = "HD Focus Mode (Trigger to Capture)";
+                pidText.innerText = tcpPid ? `PID: ${tcpPid}` : "Running";
+                placeholderText.style.display = 'none';
+                logBox.style.display = 'none';
+                videoFeed.style.display = 'block';
+                
+                if (!videoFeed.src || !videoFeed.src.includes(`/api/latest_image/${cam_id}`)) {
+                    videoFeed.src = `/api/latest_image/${cam_id}?t=` + new Date().getTime();
+                }
             } else {
                 btnTcp.classList.add('active');
+                if (btnHdfocus) btnHdfocus.style.background = 'rgba(234, 179, 8, 0.2)';
                 btnWebui.classList.remove('active');
                 statusBanner.className = 'status-banner tcp-mode';
                 statusText.innerText = "TCP Sender (Active Backend Process)";
@@ -1224,6 +1269,54 @@
             }
         }
         
+        
+        // Trigger Status SSE
+        const triggerIndicator = document.getElementById('trigger-indicator');
+        const triggerText = document.getElementById('trigger-text');
+        let triggerTimeout = null;
+        let triggerDisplayMs = 1000;
+
+        function updateTriggerTimeout(val) {
+            triggerDisplayMs = parseInt(val);
+            const valDisplay = document.getElementById('triggerTimeoutVal_cam0');
+            if (valDisplay) valDisplay.innerText = val;
+        }
+
+        const startTriggerStream = () => {
+            const evtSource = new EventSource('/api/trigger_stream');
+            evtSource.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.state === "HIGH" && data.pin === 27) {
+                        triggerIndicator.classList.add('blinking-trigger');
+                        triggerText.innerText = "TRIGGERED!";
+                        triggerText.style.color = "#a855f7";
+                        
+                        if (currentMode['cam0'] === 'hd_preview') {
+                            setTimeout(() => {
+                                const feed = document.getElementById('videoFeed_cam0');
+                                if (feed) feed.src = `/api/latest_image/cam0?t=${new Date().getTime()}`;
+                            }, 600);
+                        }
+                        
+                        if (triggerTimeout) clearTimeout(triggerTimeout);
+                        triggerTimeout = setTimeout(() => {
+                            triggerIndicator.classList.remove('blinking-trigger');
+                            triggerText.innerText = "WAITING";
+                            triggerText.style.color = "var(--text-main)";
+                        }, triggerDisplayMs);
+                    }
+                } catch (err) {
+                    console.error("Trigger parse error:", err);
+                }
+            };
+            evtSource.onerror = function() {
+                evtSource.close();
+                setTimeout(startTriggerStream, 5000);
+            };
+        };
+        startTriggerStream();
+
         // Initialize Controls UI based on backend status
         async function loadCameraControls(cam_id) {
             try {
